@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+build/
+dist/
+_selftest/
+config/logs/
+config/settings.local.json
+*.log

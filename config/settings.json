@@ -1,0 +1,52 @@
+{
+  "window": {
+    "base_height": 240,
+    "scale": 1.0,
+    "x": -1,
+    "y": -1,
+    "always_on_top": true,
+    "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
+  },
+  "bubble": {
+    "bg_color": "#FFFFFF",
+    "border_color": "#F5B8C8",
+    "text_color": "#4A4038",
+    "font_family": "Microsoft YaHei",
+    "font_size": 14,
+    "corner_radius": 16,
+    "opacity": 0.94,
+    "chars_per_second": 20,
+    "min_duration_ms": 2600,
+    "duration_per_char_ms": 95,
+    "max_width": 280,
+    "show_tail": true,
+    "_comment": "气泡样式：颜色/圆角/透明度/逐字速度/停留时长，按喜好修改后重启生效"
+  },
+  "llm": {
+    "enabled": true,
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "timeout": 15,
+    "max_tokens": 200,
+    "temperature": 0.9,
+    "_comment": "OpenAI 兼容接口配置。api_key 留空则始终使用离线对话库。支持 OpenAI/DeepSeek/Moonshot/Ollama 等"
+  },
+  "chat": {
+    "history_max_turns": 12,
+    "user_name": ""
+  },
+  "behavior": {
+    "auto_idle": true,
+    "idle_min_s": 18,
+    "idle_max_s": 45,
+    "_comment": "宠物空闲时自言自语与小动作"
+  },
+  "matting": {
+    "method": "auto",
+    "tolerance": 32,
+    "_comment": "method: auto=优先rembg(未安装则内置算法)；floodfill=强制内置算法。tolerance 越大抠得越狠"
+  },
+  "active_personality": "团子",
+  "_comment": "桌宠全局设置。所有路径均为相对路径。可另建 settings.local.json 覆盖本文件（适合存放 API Key，该文件不会提交到 GitHub）。"
+}
