@@ -211,51 +211,66 @@ def extract_and_save(video_path, action, frames_n=None):
 
     out_dir = os.path.join(assets_dir, "animations", action)
     os.makedirs(out_dir, exist_ok=True)
+    # 清空旧帧文件，避免新旧帧混杂
+    for old in os.listdir(out_dir):
+        if old.endswith(".png"):
+            try:
+                os.remove(os.path.join(out_dir, old))
+            except OSError:
+                pass
     model = pc.resolve_model("auto")
-    # 主形象尺寸（用于把保护区坐标按比例映射到帧画布）
-    main_path = os.path.join(assets_dir, "pet.png")
-    main_size = Image.open(main_path).size if os.path.isfile(main_path) else None
-    # 保护区掩码（按帧画布比例映射，所有帧共用）
-    protect = None
-    if main_size and frames:
-        h, w = frames[0].shape[:2]
-        sx, sy = w / main_size[0], h / main_size[1]
-        protect = np.zeros((h, w), dtype=bool)
-        for (x0, y0, x1, y1) in pc.PROTECT_REGIONS:
-            protect[int(y0 * sy):int(y1 * sy),
-                    int(x0 * sx):int(x1 * sx)] = True
 
+    # 1) 逐帧 AI 语义分割抠图
+    print("  逐帧抠图…")
+    all_alphas = []
+    all_imgs = []
     for i, frame in enumerate(frames):
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        # 与主形象相同的 AI 语义分割抠图（避免人物身上出现小空缺）
         try:
             alpha = pc.segment(np.asarray(img.convert("RGB")), model, verbose=False)
-            gray = np.asarray(img.convert("L"))
-            # 清理一：与帧边缘通过浅色路径连通的像素 = 背景（含灰白阴影，
-            # 视频背景常非纯白），保护区除外
-            light = ((gray >= 200).astype(np.uint8) * 255)
-            pad = cv2.copyMakeBorder(light, 1, 1, 1, 1,
-                                     cv2.BORDER_CONSTANT, value=255)
-            ff = np.zeros((gray.shape[0] + 4, gray.shape[1] + 4), np.uint8)
-            cv2.floodFill(pad, ff, (0, 0), 0, loDiff=0, upDiff=0,
-                          flags=8 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY)
-            border_light = ff[2:-2, 2:-2] > 0
-            if protect is not None:
-                border_light &= ~protect
-            alpha[border_light] = 0
-            # 清理二：远离深色内容的近白像素（掩码中残留的背景口袋）
-            nonwhite = (gray < 235).astype(np.uint8)
-            band = cv2.dilate(
-                nonwhite, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21)))
-            far = (gray >= 235) & (band == 0)
-            if protect is not None:
-                far &= ~protect
-            alpha[far] = 0
-            img = img.convert("RGBA")
-            img.putalpha(Image.fromarray(alpha))
         except Exception as e:                        # noqa: BLE001
             print(f"  第{i}帧抠图失败，保留原帧: {e}")
-            img = img.convert("RGBA")
+            alpha = np.full(img.size[::-1], 255, dtype=np.uint8)
+        all_alphas.append(alpha)
+        all_imgs.append(np.asarray(img.convert("RGB")))
+
+    # 2) 时间掩码稳定化：只保留"稳定核心 + 核心邻域内的小幅运动"，
+    #    丢弃逐帧抠图产生的随机闪烁像素（帧间时有时无 → 视觉上就是跳帧/空缺）
+    stack = np.stack([a > 128 for a in all_alphas])
+    stable = stack.mean(axis=0) >= 0.8                # 80% 帧中稳定不透明
+    expanded = cv2.dilate(stable.astype(np.uint8),
+                          cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0
+    for k, alpha in enumerate(all_alphas):
+        final = stable | (expanded & (alpha > 128))
+        all_alphas[k] = np.where(final, alpha, 0).astype(np.uint8)
+
+    # 3) 突变帧剔除：与相邻帧差异过大的帧 = AI 视频本身的突变，
+    #    用前后帧均值替换（保持节奏一致）
+    if len(all_imgs) >= 5:
+        core = stable
+        diffs = []
+        for k in range(len(all_imgs) - 1):
+            m = core
+            d = float(np.abs(all_imgs[k][m].astype(float)
+                             - all_imgs[k + 1][m].astype(float)).mean())
+            diffs.append(d)
+        mean_d, std_d = float(np.mean(diffs)), float(np.std(diffs))
+        spike = np.zeros(len(all_imgs), dtype=bool)
+        for k in range(1, len(all_imgs) - 1):
+            if diffs[k - 1] > mean_d + 2 * std_d or diffs[k] > mean_d + 2 * std_d:
+                spike[k] = True
+        for k in np.where(spike)[0]:
+            all_imgs[k] = ((all_imgs[k - 1].astype(float)
+                            + all_imgs[k + 1].astype(float)) / 2).astype(np.uint8)
+            all_alphas[k] = ((all_alphas[k - 1].astype(float)
+                              + all_alphas[k + 1].astype(float)) / 2).astype(np.uint8)
+        if spike.any():
+            print(f"  突变帧剔除 {int(spike.sum())} 帧（AI 视频帧间突变）")
+
+    # 4) 保存
+    for i, (img_arr, alpha) in enumerate(zip(all_imgs, all_alphas)):
+        img = Image.fromarray(img_arr).convert("RGBA")
+        img.putalpha(Image.fromarray(alpha))
         img.save(os.path.join(out_dir, f"frame_{i}.png"))
     print(f"  完成 → {out_dir}")
 
