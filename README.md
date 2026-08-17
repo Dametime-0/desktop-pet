@@ -184,6 +184,39 @@ python scripts\process_character.py D:\素材.jpg
 
 `api_key` 留空 = 始终离线模式。网络不通或接口报错时自动降级到离线对话库，聊天面板会显示「在线/离线」状态。
 
+### 帧动画素材（一张立绘也能动起来）
+
+桌宠支持**帧动画**：`assets/animations/<动作>/frame_0.png、frame_1.png …`，
+有帧素材的动作自动播放帧动画，没有的动作回退到程序化动画。
+
+| 动作目录 | 说明 |
+| --- | --- |
+| `idle/` | 待机（循环播放） |
+| `walk/` | 走路（循环，按行走方向自动镜像） |
+| `jump/ pat/ happy/ spin/ dance/ shake/ squish/ bounce/` | 一次性动作 |
+
+两条生成路径：
+
+**① AI 补帧（推荐）**：一张立绘 → 图生视频 → 抽帧 → 抠图 → 素材目录：
+
+```bat
+:: 需要硅基流动 API Key（https://cloud.siliconflow.cn 注册，每次生成约 0.5~2 元）
+set SILICONFLOW_API_KEY=sk-你的密钥
+python scripts\generate_frames.py               :: 生成全部默认动作（约 5~10 分钟）
+python scripts\generate_frames.py --action walk --frames 8   :: 只生成走路
+```
+
+生成提示词已按「白底、同角色、循环动作」设计（`scripts/generate_frames.py`
+顶部 `ACTIONS` 可微调，例如把动作描述改成更贴合角色的措辞）。
+
+**② 本地视频/GIF 转帧**：任何动作短视频都可以：
+
+```bat
+python scripts\video_to_frames.py 素材.mp4 jump --frames 6
+```
+
+素材不满足预期时，删除对应动作目录即可回退到程序化动画。
+
 ### 走路与提醒配置
 
 ```json

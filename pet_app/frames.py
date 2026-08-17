@@ -1,0 +1,97 @@
+# -*- coding: utf-8 -*-
+"""帧动画素材管理。
+
+素材目录约定（assets/animations/<动作>/frame_0.png, frame_1.png ...）：
+    idle   待机（循环播放）
+    walk   走路（循环播放，程序按行走方向水平翻转）
+    jump   跳跃（单次）
+    pat    摸头（单次）
+    happy  开心（单次）
+    spin / dance / shake 等其他动作同样支持
+
+有帧素材的动作优先播放帧动画；没有帧素材的动作回退到程序化变换动画。
+素材可通过 scripts/generate_frames.py（AI 补帧）或
+scripts/video_to_frames.py（本地视频转帧）生成。
+"""
+import os
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap, QTransform
+
+from .utils import assets_dir, log
+
+#: 帧动画支持的动作名
+FRAME_ACTIONS = ("idle", "walk", "jump", "pat", "happy", "spin", "dance",
+                 "shake", "squish", "bounce")
+
+
+class FrameSet:
+    """某个动作的帧序列（懒加载，QPixmap 按需生成）。"""
+
+    def __init__(self, action: str, paths):
+        self.action = action
+        self.paths = paths
+        self._pixmaps = None
+        self._mirrored = None
+        self._base_size = None
+
+    def __len__(self):
+        return len(self.paths)
+
+    def pixmaps(self, base_size=None, mirrored: bool = False):
+        """返回 QPixmap 列表；统一缩放到 base_size，mirrored 时水平翻转。
+
+        翻转用于走路方向（素材通常只有朝一个方向的步态）。
+        """
+        if (self._pixmaps is None or self._base_size != base_size
+                or self._mirrored != mirrored):
+            pmaps = []
+            for p in self.paths:
+                pm = QPixmap(p)
+                if pm.isNull():
+                    continue
+                if base_size and pm.size() != base_size:
+                    pm = pm.scaled(base_size.width(), base_size.height(),
+                                   aspectMode=Qt.AspectRatioMode.IgnoreAspectRatio,
+                                   mode=Qt.TransformationMode.SmoothTransformation)
+                if mirrored:
+                    pm = pm.transformed(QTransform().scale(-1, 1))
+                pmaps.append(pm)
+            self._pixmaps = pmaps
+            self._base_size = base_size
+            self._mirrored = mirrored
+        return self._pixmaps
+
+
+class FrameLibrary:
+    """全部动作帧素材的集合与查询。"""
+
+    def __init__(self):
+        self._sets = {}
+        self.scan()
+
+    def scan(self):
+        """扫描 assets/animations/ 目录，重建帧索引。"""
+        self._sets = {}
+        root = os.path.join(assets_dir, "animations")
+        if not os.path.isdir(root):
+            return
+        for action in os.listdir(root):
+            d = os.path.join(root, action)
+            if not os.path.isdir(d):
+                continue
+            paths = sorted(
+                os.path.join(d, f) for f in os.listdir(d)
+                if f.lower().endswith((".png", ".jpg", ".jpeg")))
+            if paths:
+                self._sets[action] = FrameSet(action, paths)
+        if self._sets:
+            log.info("帧动画素材: %s", ", ".join(
+                f"{k}({len(v)})" for k, v in sorted(self._sets.items())))
+
+    def get(self, action: str):
+        """返回动作的 FrameSet，无素材返回 None。"""
+        return self._sets.get(action)
+
+    def has(self, action: str) -> bool:
+        return action in self._sets

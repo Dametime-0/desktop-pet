@@ -149,6 +149,38 @@ def _test_rendering(ctrl, checks):
     ctrl.window.set_jump_headroom(0)
 
 
+def _test_frames(ctrl, checks):
+    """帧动画：临时生成合成帧素材 → 识别、播放、结束复位。"""
+    import shutil
+    from .utils import assets_dir
+    root = os.path.join(assets_dir, "animations")
+    shutil.rmtree(root, ignore_errors=True)
+    try:
+        d = os.path.join(root, "jump")
+        os.makedirs(d, exist_ok=True)
+        base = Image.open(os.path.join(assets_dir, "pet.png")).convert("RGBA")
+        for i, dy in enumerate((0, 16, 0)):
+            frame = Image.new("RGBA", base.size, (0, 0, 0, 0))
+            frame.alpha_composite(base, (0, -dy))
+            frame.save(os.path.join(d, f"frame_{i}.png"))
+        ctrl.anims._frames.scan()
+        _check(checks, "帧素材识别", ctrl.anims._frames.has("jump"))
+        ctrl.anims.play("jump")
+        p1 = ctrl.window.pet_item.pixmap().cacheKey()
+        loop = QEventLoop()
+        QTimer.singleShot(150, loop.quit)
+        loop.exec()
+        p2 = ctrl.window.pet_item.pixmap().cacheKey()
+        _check(checks, "帧动画播放", p1 != p2)
+        loop = QEventLoop()
+        QTimer.singleShot(500, loop.quit)
+        loop.exec()
+        _check(checks, "帧动画结束复位", not ctrl.anims.is_busy())
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        ctrl.anims._frames.scan()
+
+
 def _test_jump_headroom(ctrl, checks):
     """跳跃留白：窗口应能临时向上扩展并在释放后复原。"""
     # 等待动画空闲（截图阶段的蹦跳可能尚未结束，避免基准高度含临时留白）
@@ -265,6 +297,7 @@ def run_selftest(app) -> int:
     step(3500, lambda: _test_jump_headroom(ctrl, checks))
     step(3600, lambda: _test_walk(ctrl, checks))
     step(3800, lambda: _test_reminders(ctrl, checks))
+    step(4300, lambda: _test_frames(ctrl, checks))
 
     def finish():
         # 报告打印失败（如编码问题）也不能影响退出

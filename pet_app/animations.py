@@ -37,6 +37,25 @@ class AnimController(QObject):
         self._last_action = None
         self._breath = None
         self._sway = None
+        # 帧动画状态
+        self._frames = None           # FrameLibrary
+        self._frame_timer = QTimer(self)
+        self._frame_timer.setInterval(100)     # 默认 10fps
+        self._frame_timer.timeout.connect(self._on_frame_tick)
+        self._frame_set = None
+        self._frame_idx = 0
+        self._frame_loop = False
+        self._frame_mirror = False
+        self._frame_action = None
+        self._idle_frames = False     # 待机是否由帧动画接管
+
+    def set_frame_library(self, lib):
+        """接入帧素材库（有素材的动作优先播放帧动画）。"""
+        self._frames = lib
+        if lib and lib.has("idle") and len(lib.get("idle")) >= 2:
+            self._idle_frames = True
+        else:
+            self._idle_frames = False
 
     # ---------- 基础工具 ----------
     def set_zoom(self, zoom: float):
@@ -70,7 +89,16 @@ class AnimController(QObject):
 
     # ---------- 常驻待机动画 ----------
     def start_idle(self):
-        """待机：左右轻摆 + 上下呼吸，纯平移（不缩放不旋转，永不超出窗口）。"""
+        """待机：有帧素材播帧循环，否则左右轻摆 + 上下呼吸（纯平移）。"""
+        if self._idle_frames:
+            fs = self._frames.get("idle")
+            self._frame_set = fs
+            self._frame_idx = 0
+            self._frame_loop = True
+            self._frame_action = "idle"
+            self._apply_frame()
+            self._frame_timer.start()
+            return
         if self._breath is not None:
             return
         self._idle_t = 0.0
@@ -87,10 +115,89 @@ class AnimController(QObject):
         self.root.setTransform(QTransform.fromTranslate(x, y))
 
     def stop_idle(self):
+        """停止待机动画（帧循环或呼吸轻摆）。"""
+        if self._frame_action == "idle" and self._frame_set is not None:
+            self._frame_timer.stop()
+            self._frame_set = None
+            self._frame_action = None
         if self._breath is not None:
             self._breath.stop()
             self._breath = None
         self.root.setTransform(QTransform())
+
+    # ---------- 帧动画播放 ----------
+    def _base_frame_size(self):
+        pm = self.pet.pixmap()
+        return pm.size() if pm is not None and not pm.isNull() else None
+
+    def _apply_frame(self):
+        fs = self._frame_set
+        if fs is None:
+            return
+        pmaps = fs.pixmaps(self._base_frame_size(), self._frame_mirror)
+        if pmaps:
+            self.pet.setPixmap(pmaps[self._frame_idx % len(pmaps)])
+
+    def _play_frame_action(self, fs, action: str):
+        """播放一次性帧动画动作（暂停待机帧循环，结束后恢复）。"""
+        if self._frame_action == "idle" and self._frame_set is not None:
+            self._frame_timer.stop()
+            self._frame_set = None
+            self._frame_action = None
+        self._busy = True
+        self._last_action = action
+        self._frame_set = fs
+        self._frame_idx = 0
+        self._frame_loop = False
+        self._frame_action = action
+        self._frame_mirror = False
+        self._apply_frame()
+        self._frame_timer.start()
+
+    def _on_frame_tick(self):
+        fs = self._frame_set
+        if fs is None:
+            self._frame_timer.stop()
+            return
+        self._frame_idx += 1
+        if self._frame_idx >= len(fs):
+            if self._frame_loop:
+                self._frame_idx = 0
+            else:
+                self._frame_timer.stop()
+                self._frame_set = None
+                self._frame_action = None
+                if self._idle_frames:
+                    self.start_idle()      # 恢复待机帧循环
+                self._on_finished()
+                return
+        self._apply_frame()
+
+    def start_walk_frames(self, mirror: bool) -> bool:
+        """走路帧循环（返回 False 表示无走路帧素材，调用方回退颠簸模式）。"""
+        fs = self._frames.get("walk") if self._frames else None
+        if fs is None or len(fs) < 2:
+            return False
+        if self._frame_action == "idle" and self._frame_set is not None:
+            self._frame_timer.stop()
+            self._frame_set = None
+            self._frame_action = None
+        self._frame_set = fs
+        self._frame_idx = 0
+        self._frame_loop = True
+        self._frame_action = "walk"
+        self._frame_mirror = mirror
+        self._apply_frame()
+        self._frame_timer.start()
+        return True
+
+    def stop_walk_frames(self):
+        if self._frame_action == "walk" and self._frame_set is not None:
+            self._frame_timer.stop()
+            self._frame_set = None
+            self._frame_action = None
+            if self._idle_frames:
+                self.start_idle()
 
     # ---------- 动作播放（串行队列） ----------
     def is_busy(self) -> bool:
@@ -118,9 +225,13 @@ class AnimController(QObject):
         self.pet.setRotation(0.0)
 
     def play(self, name: str):
-        """请求播放动作。若正在播放则入队（最多保留 2 个），过度请求会被丢弃。"""
+        """请求播放动作。有帧素材优先帧动画，否则变换动画（串行队列）。"""
         if name not in ACTIONS:
             name = "jump"
+        fs = self._frames.get(name) if self._frames else None
+        if fs is not None and len(fs) >= 2:
+            self._play_frame_action(fs, name)     # 帧动画：立即播放（可打断）
+            return
         if self._busy:
             if name != self._last_action and len(self._queue) < 2:
                 self._queue.append(name)

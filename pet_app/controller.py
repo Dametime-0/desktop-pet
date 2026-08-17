@@ -22,6 +22,7 @@ from .assets import ensure_icon, ensure_pet_image, mark_custom_image
 from .bubble import BubbleWindow
 from .chat_panel import ChatPanel, ChatWorker
 from .dialogue import DialogueEngine
+from .frames import FrameLibrary
 from .personality import PersonalityError, PersonalityManager
 from .utils import personality_dir, log
 
@@ -47,6 +48,7 @@ class PetController(QObject):
         self._idle_timer.timeout.connect(self._on_idle)
         # 走路状态（窗口平移动画 + 颠簸定时器）
         self._walk_anim = None
+        self._walk_frames = False     # 本次走路是否由帧动画表现步态
         self._walk_bob_timer = QTimer(self)
         self._walk_bob_timer.setInterval(30)
         self._walk_bob_timer.timeout.connect(self._on_walk_bob)
@@ -64,6 +66,7 @@ class PetController(QObject):
         self.anims = AnimController(self.window.root_group,
                                     self.window.pet_item, self.window.scene(),
                                     headroom_cb=self.window.set_jump_headroom)
+        self.anims.set_frame_library(FrameLibrary())   # 有帧素材的动作优先帧动画
         topmost = self.settings.get("window.always_on_top", True)
         self.bubble = BubbleWindow(self.settings.get("bubble") or {}, topmost)
         self.chat = ChatPanel(self.settings, self.persona.current.name,
@@ -374,7 +377,10 @@ class PetController(QObject):
         anim.finished.connect(self._on_walk_done)
         self._walk_anim = anim
         self._bob_t = 0.0
-        self._walk_bob_timer.start()
+        # 有走路帧素材 → 播帧（按方向镜像）；否则底部锚定颠簸
+        self._walk_frames = self.anims.start_walk_frames(direction < 0)
+        if not self._walk_frames:
+            self._walk_bob_timer.start()
         anim.start()
         return True
 
@@ -392,6 +398,8 @@ class PetController(QObject):
             self._walk_anim = None
         if self._walk_bob_timer.isActive():
             self._walk_bob_timer.stop()
+        self._walk_frames = False
+        self.anims.stop_walk_frames()
         self.anims.walk_bob_reset()
 
     def _on_interaction(self):
