@@ -61,8 +61,10 @@ class PetWindow(QGraphicsView):
         self._pixmap = None
         self._fit_scale = 1.0
         self._user_scale = settings.get("window.scale", 1.0)
-        self._headroom = 0            # 顶部留白（像素），供跳跃等动作使用
+        self._headroom = 0            # 顶部临时留白（像素），供跳跃等动作使用
         self._content_h = 1           # 形象本体显示高度（像素）
+        self._content_w = 1           # 形象本体显示宽度（像素）
+        self._margin = 6              # 窗口四周边距，吸收动作的小幅溢出
 
     # ---------- 形象加载与缩放 ----------
     def load_image(self, path: str):
@@ -79,19 +81,30 @@ class PetWindow(QGraphicsView):
         return True
 
     def _apply_scale(self):
-        """按 fit × user 缩放图像并同步窗口大小。"""
+        """按 fit × user 缩放图像并同步窗口大小。
+
+        坐标约定（简单直接，无变换锚点）：
+        - 图形项以左上角为原点、平铺缩放，放在 (margin, margin)；
+        - 窗口 = 形象本体 + 四周 margin，动作的小幅溢出由 margin 吸收；
+        - 跳跃留白：场景顶部为负 y 方向（set_jump_headroom）。
+        """
         if self._pixmap is None:
             return
         self.set_jump_headroom(0)          # 缩放时取消临时跳跃留白，重新计算
         zoom = self._fit_scale * self._user_scale
         w, h = self._pixmap.width(), self._pixmap.height()
         content_h = round(h * zoom)
+        content_w = round(w * zoom)
+        self._margin = max(6, round(content_h * 0.03))
+        m = self._margin
+        self.pet_item.setPos(m, m)
         self.pet_item.setTransform(QTransform.fromScale(zoom, zoom))
-        self.root_group.setTransformOriginPoint(w * zoom / 2, h * zoom)
-        self._scene.setSceneRect(0.0, -content_h, w * zoom, content_h)
-        self.setFixedSize(round(w * zoom), content_h)
+        self.root_group.setTransform(QTransform())
+        self._scene.setSceneRect(0.0, 0.0, content_w + 2 * m, content_h + 2 * m)
+        self.setFixedSize(content_w + 2 * m, content_h + 2 * m)
         self._headroom = 0
         self._content_h = content_h
+        self._content_w = content_w
         self.geometry_changed.emit()
 
     def set_jump_headroom(self, px: float):
@@ -105,6 +118,8 @@ class PetWindow(QGraphicsView):
         zoom = self._fit_scale * self._user_scale
         w, h = self._pixmap.width(), self._pixmap.height()
         content_h = round(h * zoom)
+        content_w = round(w * zoom)
+        m = self._margin
         px = max(0, int(round(px)))
         if px == self._headroom:
             return
@@ -115,16 +130,20 @@ class PetWindow(QGraphicsView):
         new_y = self.y() - d
         if new_y >= screen.availableGeometry().top():   # 屏幕顶部空间不足则不移动
             self.move(self.x(), new_y)
-        self._scene.setSceneRect(0.0, -(content_h + px), w * zoom, content_h + px)
-        self.setFixedSize(round(w * zoom), content_h + px)
+        # 可见区 = [0, content] 本体 + [-px, 0) 顶部留白，四周 margin
+        self._scene.setSceneRect(0.0, -px, content_w + 2 * m,
+                                 content_h + 2 * m + px)
+        self.setFixedSize(content_w + 2 * m, content_h + 2 * m + px)
         self._headroom = px
         self._content_h = content_h
+        self._content_w = content_w
         self.geometry_changed.emit()
 
     def content_geometry(self):
-        """形象本体的屏幕矩形（不含顶部跳跃留白），供气泡跟随与面板定位使用。"""
+        """形象本体的屏幕矩形（不含边距与顶部跳跃留白），供气泡跟随与面板定位。"""
         geo = self.frameGeometry()
-        return geo.adjusted(0, self._headroom, 0, 0)
+        return geo.adjusted(self._margin, self._margin + self._headroom,
+                            -self._margin, -self._margin)
 
     def set_user_scale(self, scale: float):
         self._user_scale = max(SCALE_MIN, min(SCALE_MAX, scale))
@@ -161,10 +180,12 @@ class PetWindow(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             if not self._dragging and self._press_global is not None:
                 p = event.position().toPoint()
-                # 点击坐标换算到形象本体（去掉顶部留白）
-                fy = (p.y() - self._headroom) / max(1, self._content_h)
+                # 点击坐标换算到形象本体（去掉边距与顶部留白）
+                fx = (p.x() - self._margin) / max(1, self._content_w)
+                fy = (p.y() - self._margin - self._headroom) / max(1, self._content_h)
+                fx = max(0.0, min(1.0, fx))
                 fy = max(0.0, min(1.0, fy))
-                self.clicked.emit(p.x() / max(1, self.width()), fy)
+                self.clicked.emit(fx, fy)
             self._press_global = None
             self._dragging = False
         super().mouseReleaseEvent(event)

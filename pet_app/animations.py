@@ -10,11 +10,12 @@
     pat 摸头 | bounce 蹦跳 | jump 小跳 | spin 转圈 | squish 压扁
     dance 跳舞 | shake 摇头 | happy 开心（爱心粒子）
 """
+import math
 import random
 from collections import deque
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QObject, Qt,
-                            QVariantAnimation)
+                            QTimer, QVariantAnimation)
 from PySide6.QtGui import QFont, QTransform
 from PySide6.QtWidgets import QGraphicsTextItem
 
@@ -69,42 +70,27 @@ class AnimController(QObject):
 
     # ---------- 常驻待机动画 ----------
     def start_idle(self):
-        """呼吸（2.8s 循环）+ 轻微摇摆（6.2s 循环），永远运行。"""
+        """待机：左右轻摆 + 上下呼吸，纯平移（不缩放不旋转，永不超出窗口）。"""
         if self._breath is not None:
             return
-        # 呼吸：0→1→0 关键帧循环，scaleY 1.0→1.04→1.0，scaleX 反向，无跳变
-        # 注意 QGraphicsItemGroup 只支持均匀 setScale，需用 setTransform 做非均匀缩放
-        breath = QVariantAnimation(self)
-        breath.setDuration(2800)
-        breath.setStartValue(0.0)
-        breath.setEndValue(0.0)
-        breath.setKeyValueAt(0.5, 1.0)
-        breath.setLoopCount(-1)
-        breath.setEasingCurve(QEasingCurve.Type.InOutSine)
-        breath.valueChanged.connect(
-            lambda v: self.root.setTransform(
-                QTransform.fromScale(1.0 - 0.015 * v, 1.0 + 0.04 * v)))
-        self._breath = breath
-        breath.start()
-        # 摇摆：-2.5° ~ +2.5°
-        sway = QVariantAnimation(self)
-        sway.setDuration(6200)
-        sway.setStartValue(-2.5)
-        sway.setEndValue(-2.5)
-        sway.setKeyValueAt(0.5, 2.5)
-        sway.setLoopCount(-1)
-        sway.setEasingCurve(QEasingCurve.Type.InOutSine)
-        sway.valueChanged.connect(self.root.setRotation)
-        self._sway = sway
-        sway.start()
+        self._idle_t = 0.0
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setInterval(33)
+        self._idle_timer.timeout.connect(self._on_idle_tick)
+        self._idle_timer.start()
+        self._breath = self._idle_timer
+
+    def _on_idle_tick(self):
+        self._idle_t += 0.033
+        x = 1.2 * math.sin(self._idle_t * 0.9)          # 左右轻摆 ±1.2px
+        y = 1.8 * abs(math.sin(self._idle_t * 0.55))    # 上下呼吸 0~1.8px
+        self.root.setTransform(QTransform.fromTranslate(x, y))
 
     def stop_idle(self):
-        for anim in (self._breath, self._sway):
-            if anim is not None:
-                anim.stop()
-        self._breath = self._sway = None
+        if self._breath is not None:
+            self._breath.stop()
+            self._breath = None
         self.root.setTransform(QTransform())
-        self.root.setRotation(0.0)
 
     # ---------- 动作播放（串行队列） ----------
     def is_busy(self) -> bool:
@@ -224,14 +210,25 @@ class AnimController(QObject):
         return seq
 
     def _build_spin(self):
-        """转圈：绕底部中心旋转 360°。"""
-        from PySide6.QtCore import QSequentialAnimationGroup
-        seq = QSequentialAnimationGroup(self)
-        seq.addAnimation(self._make(650, QEasingCurve.Type.OutCubic,
-                                    self._lerp_fn(0, 360, self._set_rot)))
-        seq.addAnimation(self._make(200, QEasingCurve.Type.InOutSine,
-                                    self._lerp_fn(360, 0, self._set_rot)))
-        return seq
+        """转圈：缩小到 55% 后绕底部中心旋转 360°，避免甩出窗口裁切。"""
+        from PySide6.QtCore import QParallelAnimationGroup, QSequentialAnimationGroup
+        shrink = QSequentialAnimationGroup(self)
+        shrink.addAnimation(self._make(
+            250, QEasingCurve.Type.InOutQuad,
+            self._lerp_fn(0, 1, lambda v: self._set_scale(1 - 0.45 * v, 1 - 0.45 * v))))
+        shrink.addAnimation(self._make(
+            450, QEasingCurve.Type.OutBack,
+            self._lerp_fn(0, 1, lambda v: self._set_scale(0.55 + 0.45 * v,
+                                                          0.55 + 0.45 * v))))
+        spin = QSequentialAnimationGroup(self)
+        spin.addAnimation(self._make(650, QEasingCurve.Type.OutCubic,
+                                     self._lerp_fn(0, 360, self._set_rot)))
+        spin.addAnimation(self._make(200, QEasingCurve.Type.InOutSine,
+                                     self._lerp_fn(360, 0, self._set_rot)))
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(shrink)
+        group.addAnimation(spin)
+        return group
 
     def _build_squish(self):
         """压扁：缓缓摊成饼再弹回。"""
@@ -293,7 +290,7 @@ class AnimController(QObject):
             item.setFont(f)
             item.setZValue(10)
             x = r.width() * self._zoom * (0.25 + 0.5 * (i + random.random()) / max(1, n))
-            y = -r.height() * self._zoom * 0.82   # 头顶附近（形象上方）
+            y = r.height() * self._zoom * 0.06    # 头顶附近（形象顶部）
             item.setPos(x - item.boundingRect().width() / 2, y)
             self.scene.addItem(item)
 

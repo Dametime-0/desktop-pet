@@ -118,6 +118,37 @@ def _test_settings(ctrl, checks):
     _check(checks, "配置读写", ok)
 
 
+def _window_content_ratio(widget) -> float:
+    """窗口截图合成后，非背景像素占比（验证宠物确实渲染出来了）。"""
+    pm = widget.grab()
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    pm.save(buf, "PNG")
+    img = Image.open(io.BytesIO(bytes(buf.data()))).convert("RGBA")
+    base = Image.new("RGBA", img.size, (232, 240, 248, 255))
+    base.alpha_composite(img)
+    from PIL import Image as _Image
+    arr = _Image.Image.getdata  # noqa: F841 保持引用
+    px = list(base.convert("RGB").getdata())
+    bg = (232, 240, 248)
+    n_diff = sum(1 for p in px if abs(p[0] - bg[0]) + abs(p[1] - bg[1])
+                 + abs(p[2] - bg[2]) > 30)
+    return n_diff / max(1, len(px))
+
+
+def _test_rendering(ctrl, checks):
+    """渲染回归：宠物本体必须真实显示在窗口中（防止场景坐标错位导致透明窗口）。"""
+    ratio = _window_content_ratio(ctrl.window)
+    _check(checks, "渲染-宠物可见", ratio > 0.10, f"内容占比 {100*ratio:.1f}%")
+    # 跳跃峰值：窗口加高期间，头顶附近也应有内容（头部不被裁切）
+    ctrl.window.set_jump_headroom(60)
+    ctrl.anims.pet.setY(-40)                      # 模拟跳到最高点
+    ratio2 = _window_content_ratio(ctrl.window)
+    _check(checks, "渲染-跳跃中头部可见", ratio2 > 0.05, f"内容占比 {100*ratio2:.1f}%")
+    ctrl.anims.pet.setY(0)
+    ctrl.window.set_jump_headroom(0)
+
+
 def _test_jump_headroom(ctrl, checks):
     """跳跃留白：窗口应能临时向上扩展并在释放后复原。"""
     # 等待动画空闲（截图阶段的蹦跳可能尚未结束，避免基准高度含临时留白）
@@ -132,7 +163,8 @@ def _test_jump_headroom(ctrl, checks):
     _check(checks, "跳跃留白-窗口加高", ctrl.window.height() == base_h + 50,
            f"{base_h}->{ctrl.window.height()}")
     _check(checks, "跳跃留白-场景上移",
-           ctrl.window._headroom == 50 and ctrl.window._content_h == base_h)
+           ctrl.window._headroom == 50
+           and ctrl.window._content_h == base_h - 2 * ctrl.window._margin)
     ctrl.window.set_jump_headroom(0)
     _check(checks, "跳跃留白-复原", ctrl.window.height() == base_h)
 
@@ -228,6 +260,7 @@ def run_selftest(app) -> int:
     step(3200, lambda: _test_dialogue(ctrl, checks))
     step(3300, lambda: _test_matting(checks))
     step(3400, lambda: _test_settings(ctrl, checks))
+    step(3420, lambda: _test_rendering(ctrl, checks))
     step(3450, lambda: _test_bubble_placement(ctrl, checks))
     step(3500, lambda: _test_jump_headroom(ctrl, checks))
     step(3600, lambda: _test_walk(ctrl, checks))
