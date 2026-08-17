@@ -26,6 +26,7 @@ class PetWindow(QGraphicsView):
     dropped_image = Signal(str)             # 拖入图片文件
     context_menu_requested = Signal(QPoint)  # 右键菜单（全局坐标）
     geometry_changed = Signal()             # 移动/缩放，用于气泡跟随与状态保存
+    interaction_started = Signal()          # 用户按住宠物（拖动/点击），用于中断走路
 
     def __init__(self, settings):
         super().__init__()
@@ -103,6 +104,7 @@ class PetWindow(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             self._press_global = event.globalPosition().toPoint()
             self._dragging = False
+            self.interaction_started.emit()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):

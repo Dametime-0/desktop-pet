@@ -1,9 +1,9 @@
 {
   "window": {
     "base_height": 240,
-    "scale": 1.0,
-    "x": 1333,
-    "y": 621,
+    "scale": 1.272,
+    "x": 683,
+    "y": 518,
     "always_on_top": true,
     "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
   },
@@ -40,7 +40,38 @@
     "auto_idle": true,
     "idle_min_s": 18,
     "idle_max_s": 45,
-    "_comment": "宠物空闲时自言自语与小动作"
+    "walk_enabled": true,
+    "walk_range_px": 180,
+    "walk_speed_px_s": 70,
+    "_comment": "空闲时自言自语/散步/小动作；walk_range_px=散步范围，walk_speed_px_s=散步速度"
+  },
+  "reminders": {
+    "_comment": "定时提醒（气泡+动作）：interval_min 为间隔分钟，lines 随机抽取，action 可留空",
+    "enabled": true,
+    "drink": {
+      "enabled": true,
+      "interval_min": 45,
+      "lines": [
+        "到喝水时间了，起身接杯水，顺便让眼睛休息一下吧"
+      ],
+      "action": "jump"
+    },
+    "move": {
+      "enabled": true,
+      "interval_min": 90,
+      "lines": [
+        "坐得有些久了，站起来活动一下身体吧"
+      ],
+      "action": "dance"
+    },
+    "rest": {
+      "enabled": true,
+      "interval_min": 150,
+      "lines": [
+        "连续工作很久了，闭目休息五分钟吧"
+      ],
+      "action": "squish"
+    }
   },
   "matting": {
     "method": "auto",

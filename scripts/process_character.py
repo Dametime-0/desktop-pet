@@ -149,9 +149,34 @@ def segment(img_rgb: np.ndarray, model: str = "u2net") -> np.ndarray:
         filled = (labels2 == largest).astype(np.uint8)
     print(f"内部孔洞填充 {n_fill} 处")
 
-    # 5) 保护区强制不透明 + 边缘羽化
+    # 5) 保护区强制不透明
     for (x0, y0, x1, y1) in PROTECT_REGIONS:
         filled[y0:y1, x0:x1] = 1
+
+    # 6) 白色残留清理（背景缝隙/脚下阴影被误保留的白块）
+    #    a. 远离非白内容的近白像素（人物特征 5px 以外的白斑）
+    nonwhite = gray < 244
+    band = cv2.dilate(nonwhite.astype(np.uint8),
+                      cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)))
+    white_far = (gray >= 244) & (band == 0) & (filled > 0)
+    for (x0, y0, x1, y1) in PROTECT_REGIONS:
+        white_far[y0:y1, x0:x1] = False
+    filled[white_far] = 0
+    #    b. 剩余大块近白连通域（面积 >= 800 且不与保护区相交）整体移除
+    ow = ((filled > 0) & (gray >= 244)).astype(np.uint8)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(ow, 8)
+    n_rm = 0
+    for i in range(1, n):
+        x, y, bw, bh, area = stats[i]
+        in_protect = any(x + bw >= x0 and x <= x1 and y + bh >= y0 and y <= y1
+                         for (x0, y0, x1, y1) in PROTECT_REGIONS)
+        if area >= 800 and not in_protect:
+            filled[labels == i] = 0
+            n_rm += 1
+    if n_rm:
+        print(f"白色残留块移除 {n_rm} 处")
+
+    # 7) 边缘羽化
     soft = cv2.GaussianBlur(filled.astype(np.float32), (3, 3), 0)
     return (soft * 255).astype(np.uint8)
 

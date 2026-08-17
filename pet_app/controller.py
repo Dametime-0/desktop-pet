@@ -7,10 +7,13 @@
 - 左键拖动移动位置，滚轮缩放，右键弹出菜单；
 - 空闲时随机自言自语/小动作（behavior.auto_idle）。
 """
+import math
 import os
 import random
+import time
 
-from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtCore import QEasingCurve, QObject, Qt, QTimer, QVariantAnimation
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QMenu
 
 from . import llm_client, matting
@@ -42,6 +45,18 @@ class PetController(QObject):
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(self._on_idle)
+        # 走路状态（窗口平移动画 + 颠簸定时器）
+        self._walk_anim = None
+        self._walk_bob_timer = QTimer(self)
+        self._walk_bob_timer.setInterval(30)
+        self._walk_bob_timer.timeout.connect(self._on_walk_bob)
+        self._bob_t = 0.0
+        # 定时提醒（喝水/活动/休息），每分钟检查一次
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(60_000)
+        self._reminder_timer.timeout.connect(self._check_reminders)
+        self._reminder_due = {}
+        self._reset_reminder_due()
 
         # 窗口与场景
         from .window import PetWindow
@@ -64,12 +79,14 @@ class PetController(QObject):
         self.window.context_menu_requested.connect(self._show_menu)
         self.window.dropped_image.connect(self._import_image)
         self.window.geometry_changed.connect(self._on_geometry_changed)
+        self.window.interaction_started.connect(self._on_interaction)
 
         # 启动
         self.anims.start_idle()
         self.window.restore_position()
         self.window.show()
         self._schedule_idle()
+        self._reminder_timer.start()
 
     # ---------- 初始化辅助 ----------
     @staticmethod
@@ -84,6 +101,7 @@ class PetController(QObject):
     # ---------- 宠物点击 ----------
     def _on_click(self, fx: float, fy: float):
         """点击：上半身摸头 / 下半身蹦跳，并打开对话面板。"""
+        self._stop_walk()          # 点击打断走路
         if fy < HEAD_ZONE:
             self.anims.play("pat")
             line = self.dialogue.personality.offline_reply("pat")
@@ -107,7 +125,7 @@ class PetController(QObject):
             self.chat.append_pet(reply)
             self._append_history("assistant", reply)
             if action:
-                self.anims.play(action)
+                self.play_action(action)
             return
 
         cfg = self.settings.get("llm") or {}
@@ -128,6 +146,13 @@ class PetController(QObject):
             self.chat.append_pet(reply)
             self._append_history("assistant", reply)
             self.chat.set_mode("离线", "#9AA0A6")
+
+    def play_action(self, action: str):
+        """执行动作：walk 为小段散步，其余交给动画队列。"""
+        if action == "walk":
+            self._start_walk(short=True)
+        elif action:
+            self.anims.play(action)
 
     def _on_llm_done(self, result: dict):
         self.chat.set_thinking(False)
@@ -182,6 +207,21 @@ class PetController(QObject):
         top_act.triggered.connect(self._toggle_topmost)
         menu.addAction("打开对话面板", lambda: self.chat.open_near(
             self.window.frameGeometry()))
+        menu.addAction("散步", self._start_walk)
+        # 提醒子菜单
+        rem_menu = menu.addMenu("提醒")
+        rem = self.settings.get("reminders") or {}
+        master = rem_menu.addAction("启用提醒")
+        master.setCheckable(True)
+        master.setChecked(rem.get("enabled", True))
+        master.triggered.connect(self._toggle_reminders)
+        rem_menu.addSeparator()
+        for key, label in (("drink", "喝水提醒"), ("move", "活动提醒"),
+                           ("rest", "休息提醒")):
+            act = rem_menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked((rem.get(key) or {}).get("enabled", True))
+            act.triggered.connect(lambda checked, k=key: self._toggle_reminder(k, checked))
         menu.addSeparator()
         menu.addAction("更换形象…", self._choose_image)
         menu.addAction("导入人格包…", self._choose_import_pack)
@@ -220,10 +260,10 @@ class PetController(QObject):
                                         int(cfg.get("tolerance", 32)))
             self.window.load_image(dst)
             self.anims.set_zoom(self.window._fit_scale * self.window.user_scale())
-            self.bubble.show_text("新形象加载好啦～我很喜欢！")
+            self.bubble.show_text("新形象已经加载好了，我很喜欢")
         except Exception as e:                    # noqa: BLE001 导入失败不能崩溃
             log.error("形象导入失败: %s", e)
-            self.bubble.show_text("图片处理失败……换一张试试？")
+            self.bubble.show_text("图片处理失败，请换一张图片试试")
 
     # ---------- 人格包 ----------
     def _choose_import_pack(self):
@@ -239,7 +279,7 @@ class PetController(QObject):
             if result.get("image"):
                 self.window.load_image(result["image"])
                 self.anims.set_zoom(self.window._fit_scale * self.window.user_scale())
-            self.bubble.show_text(f"人格「{result['name']}」加载好啦！")
+            self.bubble.show_text(f"人格「{result['name']}」已加载")
             self.chat._title.setText(f"💬 {result['name']}")
         except (PersonalityError, OSError, ValueError) as e:
             log.warning("人格包导入失败: %s", e)
@@ -254,7 +294,7 @@ class PetController(QObject):
         if path:
             try:
                 self.persona.export_pack(path)
-                self.bubble.show_text("人格包导出成功～可以分享给朋友啦！")
+                self.bubble.show_text("人格包导出成功，可以和朋友分享了")
             except (PersonalityError, OSError) as e:
                 self.bubble.show_text(f"导出失败：{e}")
 
@@ -263,7 +303,7 @@ class PetController(QObject):
         try:
             os.startfile(target)
         except OSError:
-            self.bubble.show_text("打不开文件夹……")
+            self.bubble.show_text("无法打开文件夹")
 
     def _reload_persona(self, name: str):
         self.persona.load(name)
@@ -279,11 +319,125 @@ class PetController(QObject):
     def _on_idle(self):
         if self.settings.get("behavior.auto_idle", True):
             r = random.random()
-            if r < 0.4:
+            if r < 0.3:
                 self.bubble.show_text(self.dialogue.idle_line())
-            elif r > 0.55:
+            elif (r < 0.5
+                  and self.settings.get("behavior.walk_enabled", True)
+                  and not self.anims.is_busy()):
+                self._start_walk()                 # 空闲时溜达一小段
+            elif r < 0.65:
                 self.anims.play(random.choice(("jump", "squish", "shake")))
         self._schedule_idle()
+
+    # ---------- 走路 ----------
+    def _start_walk(self, short: bool = False) -> bool:
+        """小范围左右散步：窗口平滑平移 + 轻微颠簸，拖动/点击即中断。
+
+        返回是否成功启动（已在走/无空间/动作播放中则返回 False）。
+        """
+        if self._walk_anim is not None or self.anims.is_busy():
+            return False
+        screen = QGuiApplication.screenAt(self.window.frameGeometry().center()) \
+            or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        x, y = self.window.x(), self.window.y()
+        rng = int(self.settings.get("behavior.walk_range_px", 180))
+        if short:
+            rng = min(rng, 90)
+        # 随机方向，两侧都无空间则放弃
+        left_ok = x - 60 >= area.left() + 8
+        right_ok = x + self.window.width() + 60 <= area.right() - 8
+        directions = [d for d in (-1, 1)
+                      if (d < 0 and left_ok) or (d > 0 and right_ok)]
+        if not directions:
+            return False
+        direction = random.choice(directions)
+        limit = (x - area.left() - 8) if direction < 0 \
+            else (area.right() - 8 - (x + self.window.width()))
+        dist = max(40, min(rng, limit))
+        if dist < 40:
+            return False
+        speed = max(30, float(self.settings.get("behavior.walk_speed_px_s", 70)))
+        anim = QVariantAnimation(self)
+        anim.setDuration(int(dist / speed * 1000))
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+        start_x = x
+        anim.valueChanged.connect(
+            lambda v: self.window.move(round(start_x + dist * direction * v), y))
+        anim.finished.connect(self._on_walk_done)
+        self._walk_anim = anim
+        self._bob_t = 0.0
+        self._walk_bob_timer.start()
+        anim.start()
+        return True
+
+    def _on_walk_bob(self):
+        """走路时身体轻微上下起伏并小幅度摇摆。"""
+        self._bob_t += 0.09
+        phase = math.sin(self._bob_t * 2.2)
+        self.window.pet_item.setY(-abs(phase) * self.window.height() * 0.03)
+        self.window.pet_item.setRotation(phase * 2.5)
+
+    def _on_walk_done(self):
+        self._stop_walk()
+
+    def _stop_walk(self):
+        if self._walk_anim is not None:
+            self._walk_anim.stop()
+            self._walk_anim = None
+        if self._walk_bob_timer.isActive():
+            self._walk_bob_timer.stop()
+        self.window.pet_item.setY(0)
+        self.window.pet_item.setRotation(0)
+
+    def _on_interaction(self):
+        """用户按住宠物时中断走路。"""
+        self._stop_walk()
+
+    # ---------- 定时提醒（喝水/活动/休息） ----------
+    def _reset_reminder_due(self):
+        now = time.time()
+        self._reminder_due = {key: now + self._reminder_interval(key)
+                              for key in ("drink", "move", "rest")}
+
+    def _reminder_interval(self, key: str) -> float:
+        cfg = (self.settings.get("reminders") or {}).get(key) or {}
+        return max(5, int(cfg.get("interval_min", 60))) * 60
+
+    def _check_reminders(self):
+        """每分钟检查：到期提醒 → 气泡 + 动作，并顺延下次时间（±10% 抖动）。"""
+        rem = self.settings.get("reminders") or {}
+        if not rem.get("enabled", True):
+            return
+        now = time.time()
+        for key, label in (("drink", "喝水"), ("move", "活动"), ("rest", "休息")):
+            cfg = rem.get(key) or {}
+            if not cfg.get("enabled", True):
+                continue
+            if now >= self._reminder_due.get(key, 0):
+                lines = cfg.get("lines") or [f"{label}时间到啦，休息一下吧"]
+                self.bubble.show_text(random.choice(lines))
+                self.bubble.follow(self.window.frameGeometry(),
+                                   self._chat_rect_if_visible())
+                action = cfg.get("action", "")
+                if action:
+                    self.anims.play(action)
+                interval = self._reminder_interval(key)
+                self._reminder_due[key] = now + interval * random.uniform(0.9, 1.1)
+
+    def _toggle_reminders(self, on: bool):
+        rem = self.settings.get("reminders") or {}
+        rem["enabled"] = on
+        self.settings.set("reminders", rem)
+        self._schedule_save()
+
+    def _toggle_reminder(self, key: str, on: bool):
+        rem = self.settings.get("reminders") or {}
+        rem.setdefault(key, {})["enabled"] = on
+        self.settings.set("reminders", rem)
+        self._schedule_save()
 
     # ---------- 状态保存 / 退出 ----------
     def _chat_rect_if_visible(self):

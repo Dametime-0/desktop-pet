@@ -10,7 +10,7 @@ import os
 import sys
 
 from PIL import Image, ImageDraw
-from PySide6.QtCore import QBuffer, QIODevice, QTimer
+from PySide6.QtCore import QBuffer, QEventLoop, QIODevice, QTimer
 
 from . import matting
 from .controller import PetController
@@ -118,6 +118,46 @@ def _test_settings(ctrl, checks):
     _check(checks, "配置读写", ok)
 
 
+def _test_walk(ctrl, checks):
+    """走路：窗口应在 1.5s 内发生水平位移，且可被中断。"""
+    x0 = ctrl.window.x()
+    # 等待动画队列空闲（截图阶段的摸头/蹦跳可能仍在播放，走路会主动避让）
+    waited = 0
+    while ctrl.anims.is_busy() and waited < 3000:
+        loop = QEventLoop()
+        QTimer.singleShot(200, loop.quit)
+        loop.exec()
+        waited += 200
+    ok = ctrl._start_walk(short=True)
+    _check(checks, "走路启动", ok, f"x={x0}")
+    if ok:
+        loop = QEventLoop()
+        QTimer.singleShot(1500, loop.quit)
+        loop.exec()
+        dx = abs(ctrl.window.x() - x0)
+        _check(checks, "走路移动窗口", dx >= 10, f"dx={dx}")
+        ctrl._stop_walk()
+    else:
+        _check(checks, "走路移动窗口", False, "启动失败")
+
+
+def _test_reminders(ctrl, checks):
+    """提醒：配置存在、台词非空、到期后触发并顺延。"""
+    import time as _time
+    rem = ctrl.settings.get("reminders") or {}
+    _check(checks, "提醒配置", bool(rem.get("enabled"))
+           and all(k in rem for k in ("drink", "move", "rest")))
+    lines = (rem.get("drink") or {}).get("lines") or []
+    _check(checks, "喝水提醒台词", len(lines) > 0, lines[:1])
+    ctrl._reminder_due["drink"] = 0
+    ctrl._check_reminders()
+    advanced = ctrl._reminder_due.get("drink", 0) > _time.time()
+    text_shown = bool(getattr(ctrl.bubble, "_full_text", ""))
+    _check(checks, "提醒触发(顺延+气泡)", advanced and text_shown,
+           f"text={ctrl.bubble._full_text[:14]}")
+    ctrl.bubble.hide_now()
+
+
 def _test_bubble_placement(ctrl, checks):
     """气泡定位回归：宠物在聊天面板右侧时，气泡应贴在宠物旁、不压面板、不出屏。"""
     from PySide6.QtCore import QRect
@@ -170,6 +210,8 @@ def run_selftest(app) -> int:
     step(3300, lambda: _test_matting(checks))
     step(3400, lambda: _test_settings(ctrl, checks))
     step(3450, lambda: _test_bubble_placement(ctrl, checks))
+    step(3500, lambda: _test_walk(ctrl, checks))
+    step(3700, lambda: _test_reminders(ctrl, checks))
 
     def finish():
         # 报告打印失败（如编码问题）也不能影响退出
@@ -189,5 +231,5 @@ def run_selftest(app) -> int:
             ctrl.window.hide()
             app.exit(0 if not failed else 1)
 
-    step(3600, finish)
+    step(6000, finish)
     return app.exec()

@@ -63,7 +63,7 @@ class Personality:
             entry = value if isinstance(value, dict) else {"fact": str(value)}
             if entry.get("trigger", len(key) >= 2 and key not in MEMORY_STOPWORDS):
                 fact = entry.get("fact", "")
-                reply = entry.get("reply") or f"你问起「{key}」啦？我当然记得——{fact}～"
+                reply = entry.get("reply") or f"你问起「{key}」吗？我记得——{fact}"
                 self.rules.append({
                     "keywords": [key.lower()],
                     "replies": [reply],
@@ -141,7 +141,7 @@ class PersonalityManager:
         except (PersonalityError, OSError, json.JSONDecodeError) as e:
             log.warning("人格加载失败(%s)，使用内置兜底人格", e)
             self.current = Personality({"name": "magic", "offline_replies": {
-                "default": ["嗯？我在呢，怎么了？"]}}, "")
+                "default": ["嗯？我在，怎么了？"]}}, "")
             self.current_dir = None
         return self.current
 

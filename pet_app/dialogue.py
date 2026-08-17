@@ -77,7 +77,7 @@ class DialogueEngine:
                 if name and name not in NAME_FILLERS:
                     self._settings.set("chat.user_name", name)
                     self._settings.save()
-                    return f"记住啦！以后我就叫你「{name}」～", "happy"
+                    return f"记住了，以后我就叫你「{name}」", "happy"
         # 2) 关键词彩蛋（含记忆库）
         rule = self.match_rule(text)
         if rule:

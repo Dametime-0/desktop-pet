@@ -105,6 +105,10 @@ class AnimController(QObject):
         self.root.setRotation(0.0)
 
     # ---------- 动作播放（串行队列） ----------
+    def is_busy(self) -> bool:
+        """是否有动作动画正在播放（走路等外部动画可据此避让）。"""
+        return self._busy
+
     def play(self, name: str):
         """请求播放动作。若正在播放则入队（最多保留 2 个），过度请求会被丢弃。"""
         if name not in ACTIONS:

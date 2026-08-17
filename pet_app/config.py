@@ -50,6 +50,22 @@ DEFAULT_SETTINGS = {
         "auto_idle": True,         # 宠物空闲时自言自语/小动作
         "idle_min_s": 18,
         "idle_max_s": 45,
+        "walk_enabled": True,      # 空闲时允许小范围散步
+        "walk_range_px": 180,      # 散步范围（以当前位置为中心 ± 像素）
+        "walk_speed_px_s": 70,     # 散步速度
+    },
+    "reminders": {
+        "_comment": "定时提醒：气泡台词 + 指定动作，间隔分钟数，首次提醒在启动后一个间隔触发",
+        "enabled": True,
+        "drink": {"enabled": True, "interval_min": 45,
+                  "lines": ["到喝水时间了，起身接杯水，顺便让眼睛休息一下吧"],
+                  "action": "jump"},
+        "move": {"enabled": True, "interval_min": 90,
+                 "lines": ["坐得有些久了，站起来活动一下身体吧"],
+                 "action": "dance"},
+        "rest": {"enabled": True, "interval_min": 150,
+                 "lines": ["连续工作很久了，闭目休息五分钟吧"],
+                 "action": "squish"},
     },
     "matting": {
         "method": "auto",          # auto=优先rembg，不可用则内置flood-fill；floodfill=强制内置算法
