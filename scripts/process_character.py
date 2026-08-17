@@ -33,13 +33,18 @@ COMPONENT_AREA = (15, 8000)
 # 水印候选像素：低饱和 + 中亮度
 SAT_MAX, GRAY_MIN, GRAY_MAX = 25, 100, 235
 
-# 强制不透明保护区（面部/颈部等浅色区域），源图坐标 (x0, y0, x1, y1)
-PROTECT_REGIONS = [(370, 170, 780, 850)]
+# 强制不透明保护区（过曝面部/颈部、双腿等 AI 掩码会误删的浅色区域）
+# 源图坐标 (x0, y0, x1, y1)
+PROTECT_REGIONS = [
+    (370, 170, 780, 850),     # 面部 + 颈部
+    (290, 1490, 440, 1960),   # 左腿（含白袜）
+    (650, 1490, 795, 1960),   # 右腿
+]
 # 白晕清理：亮度 ≥ 255 - HALO_TOL 且从边缘连通的像素视为背景残留
 HALO_TOL = 6
-# 白色残留阈值：亮度 ≥ WHITE_TH 且远离人物特征的大块视为背景缝隙/阴影残留
-# （背景缝隙往往带浅灰阴影 235~255；人物主体亮度多在 220 以下，脸部受保护区保护）
-WHITE_TH = 230
+# 白色残留阈值：亮度 ≥ WHITE_TH 且通过近白路径与背景连通的像素视为背景残留
+# （阈值取 215 以穿过边缘抗锯齿像素；人物浅色区域由 PROTECT_REGIONS 保护）
+WHITE_TH = 215
 # 闭运算核大小（弥合发丝缝隙）
 CLOSE_KERNEL = 13
 
@@ -99,12 +104,17 @@ def _luma_flood_mask(gray: np.ndarray, tol: int) -> np.ndarray:
 
 
 def segment(img_rgb: np.ndarray, model: str = "u2net") -> np.ndarray:
-    """智能抠图，返回 0-255 的 alpha 数组（保证人物完整）。"""
+    """智能抠图，返回 0-255 的 alpha 数组（保证人物完整）。
+
+    以 rembg(isnet) 语义分割为主——它能正确区分"人物身上的白色内容"
+    （白袜、过曝皮肤）与"背景缝隙白块"，从根本上避免误删/误留；
+    模型不可用时退回 flood-fill + 背景残留清理。
+    """
     import cv2
     gray = np.asarray(Image.fromarray(img_rgb).convert("L"))
     h, w = gray.shape
 
-    # 1) rembg AI 掩码（模型文件缺失/下载失败则只用泛洪，避免卡在慢速下载）
+    # 1) rembg AI 掩码（模型文件缺失/下载失败则退回泛洪）
     ub_a = None
     model_path = os.path.join(os.path.expanduser("~"), ".u2net", f"{model}.onnx")
     if os.path.isfile(model_path):
@@ -115,73 +125,57 @@ def segment(img_rgb: np.ndarray, model: str = "u2net") -> np.ndarray:
             ub_a = np.asarray(out.getchannel("A"))
             print(f"rembg({model}) 掩码完成")
         except Exception as e:                        # noqa: BLE001
-            print(f"rembg 失败({e})，仅使用 flood-fill")
+            print(f"rembg 失败({e})，退回 flood-fill")
     else:
-        print(f"未找到模型 {model_path}，跳过 rembg（首次运行会自动下载，"
-              f"网络慢可稍后重试）")
+        print(f"未找到模型 {model_path}，跳过 rembg（首次运行会自动下载）")
 
-    # 2) 低容差泛洪掩码（保留浅色皮肤）
-    ff = matting.remove_background(Image.fromarray(img_rgb), "floodfill", 10)
-    ff_a = np.asarray(ff.getchannel("A"))
+    if ub_a is not None:
+        base = ub_a.copy()          # rembg 返回只读数组，这里需要写入
+    else:
+        # 兜底：低容差泛洪 + 白晕清理 + 背景残留清理
+        ff = matting.remove_background(Image.fromarray(img_rgb), "floodfill", 10)
+        base = np.asarray(ff.getchannel("A")).astype(np.uint8)
+        white = _luma_flood_mask(gray, HALO_TOL)
+        base[white & (base > 0)] = 0
+        light = (gray >= WHITE_TH).astype(np.uint8)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(light, 8)
+        border_labels = {i for i in range(1, n)
+                         if (stats[i][0] <= 0 or stats[i][1] <= 0
+                             or stats[i][0] + stats[i][2] >= w
+                             or stats[i][1] + stats[i][3] >= h)}
+        if border_labels:
+            remove = np.isin(labels, list(border_labels)) & (base > 0)
+            base[remove] = 0
 
-    union = np.maximum(ff_a, ub_a if ub_a is not None else 0).astype(np.uint8)
-
-    # 3) 白晕清理：亮度近白且从边缘连通的像素抹掉（保护区除外）
-    white = _luma_flood_mask(gray, HALO_TOL)
-    remove_mask = white & (union > 0)
+    # 2) 白色残留清理：不透明且近白、并且通过近白像素与掩码外部连通的像素
+    #    = 背景缝隙/手臂旁白块。人物身上的白色内容（白袜/过曝皮肤）被深色
+    #    描边包围，白色泛洪无法穿过，因此不会被误删。
+    white = ((gray >= WHITE_TH).astype(np.uint8) * 255)   # 注意 0/255 值，floodFill 按值连通
+    pad = cv2.copyMakeBorder(white, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=255)
+    ff_mask = np.zeros((h + 4, w + 4), np.uint8)
+    cv2.floodFill(pad, ff_mask, (0, 0), 0, loDiff=0, upDiff=0,
+                  flags=8 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY)
+    reached = ff_mask[2:-2, 2:-2] > 0
+    remove = reached & (base > 128)
     for (x0, y0, x1, y1) in PROTECT_REGIONS:
-        remove_mask[y0:y1, x0:x1] = False
-    union[remove_mask] = 0
+        remove[y0:y1, x0:x1] = False
+    base[remove] = 0
 
-    # 4) 闭运算弥合缺口 → 填充内部孔洞 → 仅保留最大连通域
-    mask = (union > 128).astype(np.uint8)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (CLOSE_KERNEL, CLOSE_KERNEL))
-    closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
-    holes = (1 - closed)
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(holes, 8)
-    filled = closed.copy()
-    n_fill = 0
-    for i in range(1, n):
-        x, y, bw, bh, _area = stats[i]
-        if x > 0 and y > 0 and x + bw < w and y + bh < h:
-            filled[labels == i] = 1
-            n_fill += 1
-    n2, labels2, stats2, _ = cv2.connectedComponentsWithStats(filled, 8)
+    # 3) 仅保留最大连通域（不做闭运算/全局孔洞填充——
+    #    它们会把背景缝隙封死再填成白块，也救不回被 AI 误删的白袜）
+    mask = (base > 128).astype(np.uint8)
+    n2, labels2, stats2, _ = cv2.connectedComponentsWithStats(mask, 8)
     if n2 > 1:
         largest = 1 + int(np.argmax(stats2[1:, cv2.CC_STAT_AREA]))
         filled = (labels2 == largest).astype(np.uint8)
-    print(f"内部孔洞填充 {n_fill} 处")
+    else:
+        filled = mask
 
-    # 5) 保护区强制不透明
+    # 3) 保护区：强制不透明（区内孔洞一并填平，保护区内没有背景）
     for (x0, y0, x1, y1) in PROTECT_REGIONS:
         filled[y0:y1, x0:x1] = 1
 
-    # 6) 白色残留清理（背景缝隙/脚下阴影被误保留的白块）
-    #    a. 远离人物特征（深色内容 5px 以外）的浅色像素
-    nonwhite = gray < WHITE_TH
-    band = cv2.dilate(nonwhite.astype(np.uint8),
-                      cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)))
-    white_far = (gray >= WHITE_TH) & (band == 0) & (filled > 0)
-    for (x0, y0, x1, y1) in PROTECT_REGIONS:
-        white_far[y0:y1, x0:x1] = False
-    filled[white_far] = 0
-    #    b. 大块浅色连通域（面积 >= 800）整体移除，但保护区内像素除外——
-    #       逐像素保护：即使白块与面部皮肤连成一个大组件，也只移除保护区外的部分
-    ow = ((filled > 0) & (gray >= WHITE_TH)).astype(np.uint8)
-    n, labels, stats, _ = cv2.connectedComponentsWithStats(ow, 8)
-    protected_mask = np.zeros_like(filled, dtype=bool)
-    for (x0, y0, x1, y1) in PROTECT_REGIONS:
-        protected_mask[y0:y1, x0:x1] = True
-    n_rm = 0
-    for i in range(1, n):
-        if stats[i, cv2.CC_STAT_AREA] >= 800:
-            comp = (labels == i) & (~protected_mask)
-            filled[comp] = 0
-            n_rm += 1
-    if n_rm:
-        print(f"白色残留块移除 {n_rm} 处")
-
-    # 7) 边缘羽化
+    # 4) 边缘羽化
     soft = cv2.GaussianBlur(filled.astype(np.float32), (3, 3), 0)
     return (soft * 255).astype(np.uint8)
 

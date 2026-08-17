@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QFileDialog, QMenu
 
 from . import llm_client, matting
 from .animations import AnimController
-from .assets import ensure_icon, ensure_pet_image
+from .assets import ensure_icon, ensure_pet_image, mark_custom_image
 from .bubble import BubbleWindow
 from .chat_panel import ChatPanel, ChatWorker
 from .dialogue import DialogueEngine
@@ -261,6 +261,7 @@ class PetController(QObject):
             cfg = self.settings.get("matting") or {}
             dst = matting.process_image(path, cfg.get("method", "auto"),
                                         int(cfg.get("tolerance", 32)))
+            mark_custom_image()                    # 标记自定义形象，升级不再覆盖
             self.window.load_image(dst)
             self.anims.set_zoom(self.window._fit_scale * self.window.user_scale())
             self.bubble.show_text("新形象已经加载好了，我很喜欢")
@@ -280,6 +281,7 @@ class PetController(QObject):
             result = self.persona.import_pack(path)
             self._reload_persona(result["name"])
             if result.get("image"):
+                mark_custom_image()                # 人格包带形象 → 自定义
                 self.window.load_image(result["image"])
                 self.anims.set_zoom(self.window._fit_scale * self.window.user_scale())
             self.bubble.show_text(f"人格「{result['name']}」已加载")
