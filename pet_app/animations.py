@@ -130,13 +130,21 @@ class AnimController(QObject):
         pm = self.pet.pixmap()
         return pm.size() if pm is not None and not pm.isNull() else None
 
-    def _apply_frame(self):
+    def _frame_seq(self):
+        """当前帧集合的播放序列（循环时末帧后追加交叉淡化过渡帧）。"""
         fs = self._frame_set
         if fs is None:
-            return
-        pmaps = fs.pixmaps(self._base_frame_size(), self._frame_mirror)
-        if pmaps:
-            self.pet.setPixmap(pmaps[self._frame_idx % len(pmaps)])
+            return []
+        base = self._base_frame_size()
+        seq = list(fs.pixmaps(base, self._frame_mirror))
+        if self._frame_loop and len(seq) >= 2:
+            seq += fs.transitions(base, self._frame_mirror)
+        return seq
+
+    def _apply_frame(self):
+        seq = self._frame_seq()
+        if seq:
+            self.pet.setPixmap(seq[self._frame_idx % len(seq)])
 
     def _play_frame_action(self, fs, action: str):
         """播放一次性帧动画动作（暂停待机帧循环，结束后恢复）。"""
@@ -155,14 +163,13 @@ class AnimController(QObject):
         self._frame_timer.start()
 
     def _on_frame_tick(self):
-        fs = self._frame_set
-        if fs is None:
+        seq = self._frame_seq()
+        if not seq:
             self._frame_timer.stop()
             return
-        self._frame_idx += 1
-        if self._frame_idx >= len(fs):
+        if self._frame_idx + 1 >= len(seq):
             if self._frame_loop:
-                self._frame_idx = 0
+                self._frame_idx = 0        # 循环（含过渡帧，衔接平滑）
             else:
                 self._frame_timer.stop()
                 self._frame_set = None
@@ -171,6 +178,8 @@ class AnimController(QObject):
                     self.start_idle()      # 恢复待机帧循环
                 self._on_finished()
                 return
+        else:
+            self._frame_idx += 1
         self._apply_frame()
 
     def start_walk_frames(self, mirror: bool) -> bool:

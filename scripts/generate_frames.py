@@ -184,11 +184,31 @@ def extract_and_save(video_path, action, frames_n=None):
     out_dir = os.path.join(assets_dir, "animations", action)
     os.makedirs(out_dir, exist_ok=True)
     model = pc.resolve_model("auto")
+    # 主形象尺寸（用于把保护区坐标按比例映射到帧画布）
+    main_path = os.path.join(assets_dir, "pet.png")
+    main_size = Image.open(main_path).size if os.path.isfile(main_path) else None
+
     for i, frame in enumerate(frames):
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         # 与主形象相同的 AI 语义分割抠图（避免人物身上出现小空缺）
         try:
             alpha = pc.segment(np.asarray(img.convert("RGB")), model, verbose=False)
+            # 额外清理：远离深色内容的近白像素（isnet 掩码中残留的
+            # 背景口袋 = 人物背后的白色块）
+            gray = np.asarray(img.convert("L"))
+            nonwhite = (gray < 235).astype(np.uint8)
+            band = cv2.dilate(
+                nonwhite, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21)))
+            far = (gray >= 235) & (band == 0)
+            if main_size:                       # 保护区按比例映射到帧画布
+                sx = gray.shape[1] / main_size[0]
+                sy = gray.shape[0] / main_size[1]
+                protect = np.zeros_like(far, dtype=bool)
+                for (x0, y0, x1, y1) in pc.PROTECT_REGIONS:
+                    protect[int(y0 * sy):int(y1 * sy),
+                            int(x0 * sx):int(x1 * sx)] = True
+                far &= ~protect
+            alpha[far] = 0
             img = img.convert("RGBA")
             img.putalpha(Image.fromarray(alpha))
         except Exception as e:                        # noqa: BLE001
@@ -221,6 +241,20 @@ def main():
     api_key = os.environ.get("SILICONFLOW_API_KEY", "")
     if "--api-key" in args:
         api_key = args[args.index("--api-key") + 1]
+
+    # 从已保留的原片重新抽帧（本地操作，不需要 API Key）
+    if "--from-raw" in args:
+        idx = args.index("--from-raw")
+        video = args[idx + 1]
+        action = args[idx + 2] if len(args) > idx + 2 and args[idx + 2] in ACTIONS else "idle"
+        frame_override = int(args[args.index("--frames") + 1]) if "--frames" in args else None
+        if not os.path.isfile(video):
+            print(f"找不到视频: {video}")
+            sys.exit(1)
+        extract_and_save(video, action, frame_override)
+        print("桌宠重启后生效。")
+        sys.exit(0)
+
     if not api_key:
         print("缺少 API Key：请设置环境变量 SILICONFLOW_API_KEY 或使用 --api-key 传入")
         sys.exit(1)
@@ -244,19 +278,6 @@ def main():
     if "--frames" in args:
         frame_override = int(args[args.index("--frames") + 1])
     shots = int(args[args.index("--shots") + 1]) if "--shots" in args else 1
-
-    # 从已保留的原片重新抽帧（不重新生成、不扣费）：
-    #   python scripts/generate_frames.py --from-raw 视频.mp4 walk --frames 8
-    if "--from-raw" in args:
-        idx = args.index("--from-raw")
-        video = args[idx + 1]
-        action = args[idx + 2] if len(args) > idx + 2 and args[idx + 2] in ACTIONS else "idle"
-        if not os.path.isfile(video):
-            print(f"找不到视频: {video}")
-            sys.exit(1)
-        extract_and_save(video, action, frame_override)
-        print("桌宠重启后生效。")
-        sys.exit(0)
 
     image_path = os.path.join(assets_dir, "pet.png")
     if not os.path.isfile(image_path):

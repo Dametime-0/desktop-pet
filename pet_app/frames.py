@@ -16,13 +16,16 @@ scripts/video_to_frames.py（本地视频转帧）生成。
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QTransform
+from PySide6.QtGui import QPainter, QPixmap, QTransform
 
 from .utils import assets_dir, log
 
 #: 帧动画支持的动作名
 FRAME_ACTIONS = ("idle", "walk", "jump", "pat", "happy", "spin", "dance",
                  "shake", "squish", "bounce")
+
+#: 循环衔接的交叉淡化过渡帧数（消除"动作没播完就跳回开头"的断裂感）
+TRANSITION_FRAMES = 3
 
 
 class FrameSet:
@@ -61,6 +64,30 @@ class FrameSet:
             self._base_size = base_size
             self._mirrored = mirrored
         return self._pixmaps
+
+    def transitions(self, base_size=None, mirrored: bool = False):
+        """循环衔接过渡帧：末帧与首帧的交叉淡化序列。
+
+        AI 生成的循环视频首尾并不完全衔接，直接跳回开头会有断裂感；
+        用 3 帧淡入淡出过渡把末帧平滑引回首帧。
+        """
+        pmaps = self.pixmaps(base_size, mirrored)
+        if len(pmaps) < 2:
+            return []
+        last, first = pmaps[-1], pmaps[0]
+        result = []
+        for k in range(1, TRANSITION_FRAMES + 1):
+            t = k / (TRANSITION_FRAMES + 1)
+            out = QPixmap(last.size())
+            out.fill(Qt.GlobalColor.transparent)
+            p = QPainter(out)
+            p.setOpacity(1.0 - t)
+            p.drawPixmap(0, 0, last)
+            p.setOpacity(t)
+            p.drawPixmap(0, 0, first)
+            p.end()
+            result.append(out)
+        return result
 
 
 class FrameLibrary:
