@@ -200,13 +200,14 @@ class PetWindow(QGraphicsView):
         self.show()
 
     def restore_position(self):
-        """恢复上次位置（未记录或已不在屏幕内则放到主屏右下角）。"""
+        """恢复上次位置（未记录或窗口中心已不在任何屏幕内则放到主屏右下角）。"""
         x, y = self._settings.get("window.x"), self._settings.get("window.y")
         if isinstance(x, (int, float)) and isinstance(y, (int, float)) and x >= 0 and y >= 0:
-            for screen in QApplication.screens():
-                if screen.availableGeometry().contains(QPoint(round(x), round(y))):
-                    self.move(round(x), round(y))
-                    return
+            center = QPoint(round(x) + self.width() // 2,
+                            round(y) + self.height() // 2)
+            if QApplication.screenAt(center) is not None:   # 窗口中心必须在屏幕内
+                self.move(round(x), round(y))
+                return
         geo = QApplication.primaryScreen().availableGeometry()
         self.move(geo.right() - self.width() - 40,
                   geo.bottom() - self.height() - 60)

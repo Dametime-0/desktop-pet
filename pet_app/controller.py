@@ -443,6 +443,30 @@ class PetController(QObject):
         self._schedule_save()
 
     # ---------- 状态保存 / 退出 ----------
+    def show_up(self):
+        """把桌宠窗口带到用户面前（第二次启动时被调用）。
+
+        窗口完全不在任何屏幕内时（如显示器变更/被拖丢），挪到鼠标所在屏幕。
+        """
+        from PySide6.QtGui import QCursor
+        geo = self.window.frameGeometry()
+        if QGuiApplication.screenAt(geo.center()) is None:
+            cursor = QGuiApplication.screenAt(QCursor.pos()) \
+                or QGuiApplication.primaryScreen()
+            area = cursor.availableGeometry()
+            self.window.move(max(area.left() + 8,
+                                 min(self.window.x(),
+                                     area.right() - self.window.width() - 8)),
+                             max(area.top() + 8,
+                                 min(self.window.y(),
+                                     area.bottom() - self.window.height() - 8)))
+        self.window.show()
+        self.window.raise_()
+        self.bubble.hide_now()
+        self.bubble.show_text(self.dialogue.idle_line())
+        self.bubble.follow(self._pet_rect(), self._chat_rect_if_visible())
+        log.info("收到唤醒请求，桌宠已显示")
+
     def _chat_rect_if_visible(self):
         return self.chat.frameGeometry() if self.chat.isVisible() else None
 
