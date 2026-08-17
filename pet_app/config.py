@@ -8,8 +8,9 @@
 import copy
 import json
 import os
+import shutil
 
-from .utils import config_dir, log
+from .utils import BUNDLED_CONFIG_DIR, config_dir, log
 
 DEFAULT_SETTINGS = {
     "window": {
@@ -86,6 +87,15 @@ class Settings:
 
     def load(self):
         data = copy.deepcopy(DEFAULT_SETTINGS)
+        # 主配置不存在时，优先复制随包出厂配置（绿色版解压后保持默认值一致）
+        bundled = os.path.join(BUNDLED_CONFIG_DIR, "settings.json")
+        if (not os.path.isfile(self.main_path)
+                and os.path.isfile(bundled)
+                and os.path.normcase(bundled) != os.path.normcase(self.main_path)):
+            try:
+                shutil.copyfile(bundled, self.main_path)
+            except OSError as e:
+                log.warning("出厂配置复制失败: %s", e)
         for path in (self.main_path, self.local_path):
             if os.path.isfile(path):
                 try:

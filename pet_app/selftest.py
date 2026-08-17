@@ -7,12 +7,20 @@
 """
 import io
 import os
+import sys
 
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QBuffer, QIODevice, QTimer
 
 from . import matting
 from .controller import PetController
+
+# Windows 控制台默认 GBK，打印 emoji 会抛异常导致自检中断，这里统一转 UTF-8
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    pass
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "_selftest")
@@ -68,7 +76,17 @@ def _test_dialogue(ctrl, checks):
 
 
 def _test_matting(checks):
-    """合成一张白底图片 → 抠图 → 验证边角透明、主体不透明。"""
+    """合成一张白底图片 → 抠图 → 验证边角透明、主体不透明。
+
+    抠图会写入正式形象 assets/pet.png，测试前后备份/还原，避免污染。
+    """
+    from .default_image import draw_default_pet
+    from .utils import assets_dir
+    pet_path = os.path.join(assets_dir, "pet.png")
+    backup = None
+    if os.path.isfile(pet_path):
+        with open(pet_path, "rb") as f:
+            backup = f.read()
     img = Image.new("RGB", (300, 300), (255, 255, 255))
     d = ImageDraw.Draw(img)
     d.ellipse([80, 80, 220, 220], fill=(230, 80, 80))      # 红色主体
@@ -85,6 +103,13 @@ def _test_matting(checks):
         res.convert("RGB").save(os.path.join(OUT_DIR, "matting_result.png"))
     except Exception as e:                                # noqa: BLE001
         _check(checks, "抠图流程", False, repr(e))
+    finally:
+        # 还原正式形象文件（备份缺失时重新生成默认形象）
+        if backup is not None:
+            with open(pet_path, "wb") as f:
+                f.write(backup)
+        elif os.path.isfile(pet_path):
+            draw_default_pet().save(pet_path)
 
 
 def _test_settings(ctrl, checks):
@@ -121,16 +146,22 @@ def run_selftest(app) -> int:
     step(3400, lambda: _test_settings(ctrl, checks))
 
     def finish():
-        passed = [c for c in checks if c[1]]
-        failed = [c for c in checks if not c[1]]
-        print(f"\n===== 自检完成：{len(passed)}/{len(checks)} 通过 =====")
-        for name, ok, extra in checks:
-            print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f"  ({extra})" if extra else ""))
-        print(f"截图与产物目录: {OUT_DIR}")
-        ctrl.bubble.hide_now()
-        ctrl.chat.hide()
-        ctrl.window.hide()
-        app.exit(0 if not failed else 1)
+        # 报告打印失败（如编码问题）也不能影响退出
+        try:
+            passed = [c for c in checks if c[1]]
+            failed = [c for c in checks if not c[1]]
+            print(f"\n===== 自检完成：{len(passed)}/{len(checks)} 通过 =====")
+            for name, ok, extra in checks:
+                print(f"  [{'PASS' if ok else 'FAIL'}] {name}"
+                      + (f"  ({extra})" if extra else ""))
+            print(f"截图与产物目录: {OUT_DIR}")
+        except Exception as e:                    # noqa: BLE001
+            print("SELFTEST REPORT ERROR:", repr(e))
+        finally:
+            ctrl.bubble.hide_now()
+            ctrl.chat.hide()
+            ctrl.window.hide()
+            app.exit(0 if not failed else 1)
 
     step(3600, finish)
     return app.exec()

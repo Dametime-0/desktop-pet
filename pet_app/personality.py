@@ -20,7 +20,7 @@ import re
 import shutil
 import zipfile
 
-from .utils import PERSONALITY_DIR, assets_dir, log
+from .utils import BUNDLED_PERSONALITY_DIR, assets_dir, log, personality_dir
 
 #: 记忆库中这些常见词默认不作为触发关键词（避免几乎每句话都命中）
 MEMORY_STOPWORDS = {"主人", "我", "你", "他", "她", "它", "的", "了", "呢", "吗"}
@@ -98,14 +98,15 @@ class PersonalityManager:
         self.load(settings.get("active_personality", "default"))
 
     # ---------- 加载 ----------
-    def _find_dir(self, name: str) -> str:
-        """按人格名查找目录：优先精确目录名，其次扫描 personality.json 的 name 字段。"""
-        direct = os.path.join(PERSONALITY_DIR, _valid_dir_name(name))
+    @staticmethod
+    def _scan_dir(root: str, name: str):
+        """在某个根目录下按目录名或 personality.json 的 name 字段查找人格目录。"""
+        direct = os.path.join(root, _valid_dir_name(name))
         if os.path.isdir(direct):
             return direct
-        if os.path.isdir(PERSONALITY_DIR):
-            for entry in os.listdir(PERSONALITY_DIR):
-                d = os.path.join(PERSONALITY_DIR, entry)
+        if os.path.isdir(root):
+            for entry in os.listdir(root):
+                d = os.path.join(root, entry)
                 cfg = os.path.join(d, "personality.json")
                 if os.path.isfile(cfg):
                     try:
@@ -114,6 +115,14 @@ class PersonalityManager:
                                 return d
                     except (OSError, json.JSONDecodeError):
                         continue
+        return None
+
+    def _find_dir(self, name: str) -> str:
+        """查找人格目录：用户目录优先，其次随包资源目录。"""
+        for root in (personality_dir, BUNDLED_PERSONALITY_DIR):
+            found = self._scan_dir(root, name)
+            if found:
+                return found
         raise PersonalityError(f"找不到人格「{name}」，请检查 personalities/ 目录")
 
     def load(self, name: str = None):
@@ -137,15 +146,20 @@ class PersonalityManager:
         return self.current
 
     def list_available(self):
-        """列出全部可用人格名。"""
-        names = []
-        if os.path.isdir(PERSONALITY_DIR):
-            for entry in os.listdir(PERSONALITY_DIR):
-                cfg = os.path.join(PERSONALITY_DIR, entry, "personality.json")
+        """列出全部可用人格名（用户目录 + 随包目录去重）。"""
+        names, seen = [], set()
+        for root in (personality_dir, BUNDLED_PERSONALITY_DIR):
+            if not os.path.isdir(root):
+                continue
+            for entry in os.listdir(root):
+                cfg = os.path.join(root, entry, "personality.json")
                 if os.path.isfile(cfg):
                     try:
                         with open(cfg, "r", encoding="utf-8") as f:
-                            names.append(json.load(f).get("name", entry))
+                            n = json.load(f).get("name", entry)
+                        if n not in seen:
+                            seen.add(n)
+                            names.append(n)
                     except (OSError, json.JSONDecodeError):
                         continue
         return names
@@ -190,7 +204,7 @@ class PersonalityManager:
             if not name:
                 raise PersonalityError("personality.json 缺少 name 字段")
             result["name"] = name
-            dst = os.path.join(PERSONALITY_DIR, _valid_dir_name(name))
+            dst = os.path.join(personality_dir, _valid_dir_name(name))
             if os.path.isdir(dst):          # 同名覆盖
                 shutil.rmtree(dst, ignore_errors=True)
             os.makedirs(dst, exist_ok=True)

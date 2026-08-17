@@ -10,7 +10,7 @@
 变换锚点均为"底部中心"，缩放时宠物像站在地上一样。
 """
 from PySide6.QtCore import Qt, Signal, QPoint
-from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtGui import QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsItemGroup,
                                QGraphicsPixmapItem, QGraphicsScene, QGraphicsView)
 
@@ -81,7 +81,7 @@ class PetWindow(QGraphicsView):
             return
         zoom = self._fit_scale * self._user_scale
         w, h = self._pixmap.width(), self._pixmap.height()
-        self.pet_item.setScale(zoom)
+        self.pet_item.setTransform(QTransform.fromScale(zoom, zoom))
         self.root_group.setTransformOriginPoint(w * zoom / 2, h * zoom)
         self.setFixedSize(round(w * zoom), round(h * zoom))
         self.geometry_changed.emit()

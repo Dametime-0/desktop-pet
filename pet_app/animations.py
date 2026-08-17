@@ -15,7 +15,7 @@ from collections import deque
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QObject, Qt,
                             QVariantAnimation)
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QTransform
 from PySide6.QtWidgets import QGraphicsTextItem
 
 HEART_EMOJIS = ("❤", "💕", "✨", "🌸")
@@ -55,8 +55,9 @@ class AnimController(QObject):
         return lambda v: setter(a + (b - a) * v)
 
     def _set_scale(self, sx, sy):
+        # PySide6 中 setScale 仅支持均匀缩放，非均匀缩放用 setTransform
         z = self._zoom
-        self.pet.setScale(z * sx, z * sy)
+        self.pet.setTransform(QTransform.fromScale(z * sx, z * sy))
 
     def _set_rot(self, deg):
         self.pet.setRotation(deg)
@@ -70,6 +71,7 @@ class AnimController(QObject):
         if self._breath is not None:
             return
         # 呼吸：0→1→0 关键帧循环，scaleY 1.0→1.04→1.0，scaleX 反向，无跳变
+        # 注意 QGraphicsItemGroup 只支持均匀 setScale，需用 setTransform 做非均匀缩放
         breath = QVariantAnimation(self)
         breath.setDuration(2800)
         breath.setStartValue(0.0)
@@ -78,7 +80,8 @@ class AnimController(QObject):
         breath.setLoopCount(-1)
         breath.setEasingCurve(QEasingCurve.Type.InOutSine)
         breath.valueChanged.connect(
-            lambda v: self.root.setScale(1.0 - 0.015 * v, 1.0 + 0.04 * v))
+            lambda v: self.root.setTransform(
+                QTransform.fromScale(1.0 - 0.015 * v, 1.0 + 0.04 * v)))
         self._breath = breath
         breath.start()
         # 摇摆：-2.5° ~ +2.5°
@@ -98,7 +101,7 @@ class AnimController(QObject):
             if anim is not None:
                 anim.stop()
         self._breath = self._sway = None
-        self.root.setScale(1.0, 1.0)
+        self.root.setTransform(QTransform())
         self.root.setRotation(0.0)
 
     # ---------- 动作播放（串行队列） ----------

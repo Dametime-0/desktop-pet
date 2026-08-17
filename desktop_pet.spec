@@ -46,4 +46,7 @@ coll = COLLECT(
     upx=False,
     upx_exclude=[],
     name='桌宠绿色版',
+    # PyInstaller 6.x 会把 datas 放入 _internal/（随包只读资源），
+    # 程序侧采用双目录设计：_internal 为出厂副本，用户修改保存在 exe 同级
+    # config/assets/personalities 目录（优先加载），见 pet_app/utils.py
 )

@@ -229,6 +229,11 @@ desktop-pet/
 └── scripts/build.py           # 打包脚本
 ```
 
+**绿色版目录说明**：打包后的 `桌宠绿色版/` 中，出厂副本（assets、personalities、config、
+README）位于 `_internal/` 内（只读）。你导入的新形象/人格、修改后的配置会保存在 exe 同级
+的 `assets/`、`personalities/`、`config/` 目录中（首次变更时自动创建），程序优先读取这些
+用户文件——所以「手动替换 assets/pet.png」在绿色版中同样成立。
+
 ---
 
 ## ❓ 常见问题排查（FAQ）

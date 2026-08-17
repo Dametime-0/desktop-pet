@@ -35,8 +35,15 @@ def main():
                              (64, 64), (128, 128), (256, 256)])
         print("      已生成图标 assets/pet.ico")
 
-    # 2) PyInstaller 打包
+    # 2) PyInstaller 打包（先清理开发日志，避免随包分发）
     print("[2/3] PyInstaller 打包中（首次较慢，请耐心等待）……")
+    logs_dir = os.path.join(ROOT, "config", "logs")
+    if os.path.isdir(logs_dir):
+        for fn in os.listdir(logs_dir):
+            try:
+                os.remove(os.path.join(logs_dir, fn))
+            except OSError:
+                pass
     subprocess.check_call([sys.executable, "-m", "PyInstaller",
                            "desktop_pet.spec", "--noconfirm"])
 

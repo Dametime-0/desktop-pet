@@ -20,7 +20,7 @@ from .chat_panel import ChatPanel, ChatWorker
 from .default_image import ensure_default_image, ensure_icon
 from .dialogue import DialogueEngine
 from .personality import PersonalityError, PersonalityManager
-from .utils import PERSONALITY_DIR, log
+from .utils import personality_dir, log
 
 HEAD_ZONE = 0.45            # 上半部分视为头部（摸头）
 SCALE_PRESETS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
@@ -256,7 +256,7 @@ class PetController(QObject):
                 self.bubble.show_text(f"导出失败：{e}")
 
     def _open_personality_dir(self):
-        target = self.persona.current_dir or PERSONALITY_DIR
+        target = self.persona.current_dir or personality_dir
         try:
             os.startfile(target)
         except OSError:

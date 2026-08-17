@@ -9,7 +9,7 @@ import os
 
 from PIL import Image, ImageDraw, ImageFilter
 
-from .utils import assets_dir, log
+from .utils import BUNDLED_ASSETS_DIR, assets_dir, log
 
 # 配色（奶油团子风）
 C_BODY_EDGE = (255, 224, 178)
@@ -121,9 +121,21 @@ def draw_default_pet(size: int = 512) -> Image.Image:
 
 
 def ensure_default_image() -> str:
-    """确保默认形象存在，返回图片路径（assets/pet.png）。"""
+    """确保默认形象存在，返回图片路径。
+
+    优先级：用户目录 assets/pet.png（用户导入/替换）→ 随包默认形象 → 现场绘制。
+    """
     path = os.path.join(assets_dir, "pet.png")
     if not os.path.isfile(path):
+        bundled = os.path.join(BUNDLED_ASSETS_DIR, "pet.png")
+        if os.path.isfile(bundled) and os.path.normcase(bundled) != os.path.normcase(path):
+            try:
+                import shutil
+                shutil.copyfile(bundled, path)
+                log.info("已复制出厂形象: %s -> %s", bundled, path)
+                return path
+            except OSError as e:
+                log.warning("出厂形象复制失败: %s", e)
         try:
             draw_default_pet().save(path)
             log.info("已生成默认形象: %s", path)
@@ -136,6 +148,14 @@ def ensure_icon() -> str:
     """确保程序图标存在，返回 assets/pet.ico 路径。"""
     path = os.path.join(assets_dir, "pet.ico")
     if not os.path.isfile(path):
+        bundled = os.path.join(BUNDLED_ASSETS_DIR, "pet.ico")
+        if os.path.isfile(bundled) and os.path.normcase(bundled) != os.path.normcase(path):
+            try:
+                import shutil
+                shutil.copyfile(bundled, path)
+                return path
+            except OSError as e:
+                log.warning("出厂图标复制失败: %s", e)
         try:
             img = draw_default_pet(256)
             img.save(path, sizes=[(16, 16), (24, 24), (32, 32), (48, 48),
