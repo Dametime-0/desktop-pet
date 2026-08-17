@@ -2,8 +2,8 @@
   "window": {
     "base_height": 240,
     "scale": 1.0,
-    "x": -1,
-    "y": -1,
+    "x": 1370,
+    "y": 686,
     "always_on_top": true,
     "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
   },
@@ -47,6 +47,6 @@
     "tolerance": 32,
     "_comment": "method: auto=优先rembg(未安装则内置算法)；floodfill=强制内置算法。tolerance 越大抠得越狠"
   },
-  "active_personality": "小晴",
+  "active_personality": "magic",
   "_comment": "桌宠全局设置。所有路径均为相对路径。可另建 settings.local.json 覆盖本文件（适合存放 API Key，该文件不会提交到 GitHub）。"
 }

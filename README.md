@@ -12,7 +12,7 @@
 
 | 模块 | 说明 |
 | --- | --- |
-| 形象 | 人形角色（内置小晴）；支持导入 JPG/PNG，自动抠图去背景（内置 flood-fill 算法，装了 rembg 可自动用 AI 抠图）；也支持直接拖图片到宠物身上；`scripts/process_character.py` 支持素材去水印+抠图预处理 |
+| 形象 | 人形角色（内置 magic）；支持导入 JPG/PNG，自动抠图去背景（内置 flood-fill 算法，装了 rembg 可自动用 AI 抠图）；也支持直接拖图片到宠物身上；`scripts/process_character.py` 支持素材去水印+抠图预处理 |
 | 窗口 | 透明无边框、默认置顶；左键拖动位置、滚轮缩放大小、位置与大小自动记忆 |
 | 动画 | 空闲呼吸摇摆、点击头部摸头（压扁回弹+爱心）、点击身体轻戳（蹦跳），另有转圈/跳舞/压扁/摇头等彩蛋动作，动作队列保证过渡流畅 |
 | 气泡 | 点击互动弹出文字气泡，逐字显示、自动消失；自动在宠物上/下/左/右选取不遮挡主体、不压住聊天面板且完整在屏幕内的位置，尾巴始终指向宠物，样式全部可在配置中修改 |
@@ -26,7 +26,7 @@
 
 ### 方式一：绿色版（推荐给普通用户）
 
-1. 解压 `桌宠绿色版_v2.0.0.zip` 到任意目录（建议非系统盘，如 `D:\桌宠`）；
+1. 解压 `桌宠绿色版_v2.1.0.zip` 到任意目录（建议非系统盘，如 `D:\桌宠`）；
 2. 双击 `DesktopPet.exe`；
 3. 桌宠出现在屏幕右下角，开箱即用。
 
@@ -105,7 +105,7 @@ python scripts\process_character.py D:\素材.jpg
 
 ```json
 {
-  "name": "小晴",
+  "name": "magic",
   "version": "2.0.0",
   "author": "你自己",
 
@@ -117,8 +117,8 @@ python scripts\process_character.py D:\素材.jpg
   },
 
   "memory": {                                          // 专属记忆库
-    "咖啡": {"fact": "小晴工作前总要喝一杯热咖啡", "trigger": true},
-    "你": {"fact": "是小晴最重要的人", "trigger": false}
+    "咖啡": {"fact": "magic 工作前总要喝一杯热咖啡", "trigger": true},
+    "重要的你": {"fact": "是 magic 最在意的人", "trigger": false}
   },
 
   "keyword_rules": [                                   // 关键词触发规则
@@ -202,7 +202,7 @@ pyinstaller desktop_pet.spec --noconfirm
 产物：
 
 - `dist/桌宠绿色版/` — 单文件夹绿色版（内含 DesktopPet.exe，全部依赖已内嵌）；
-- `dist/桌宠绿色版_v2.0.0.zip` — 压缩包，发给接收方**解压双击 exe 即用**。
+- `dist/桌宠绿色版_v2.1.0.zip` — 压缩包，发给接收方**解压双击 exe 即用**。
 
 > 打包前如已通过菜单更换过形象，`assets/pet.png` 即当前形象，会一并打包。
 > 未使用 UPX 压缩，避免杀毒软件误报。
@@ -282,7 +282,7 @@ PyInstaller 打包的 exe 偶发误报（未加壳未混淆），添加信任即
 把它拖回来即可；位置保存后重启会校验是否在屏幕内，不在则回到主屏右下角。
 
 **Q10：想恢复出厂设置？**
-删除 `config/settings.json`（程序会自动重建默认配置）；删除 `assets/pet.png` 后重启，则恢复随包内置形象（小晴）。
+删除 `config/settings.json`（程序会自动重建默认配置）；删除 `assets/pet.png` 后重启，则恢复随包内置形象（magic）。
 
 ---
 

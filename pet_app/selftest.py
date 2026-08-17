@@ -161,7 +161,7 @@ def run_selftest(app) -> int:
     step(1700, lambda: ctrl.anims.play("bounce"))
     step(2300, lambda: _save_grab(ctrl.window, "04_bounce.png"))
     step(2400, lambda: ctrl.chat.open_near(ctrl.window.frameGeometry()))
-    step(2500, lambda: ctrl.chat.append_user("小晴你好呀"))
+    step(2500, lambda: ctrl.chat.append_user("magic 你好呀"))
     step(2600, lambda: ctrl.chat.append_pet("你好，我在呢～"))
     step(3000, lambda: _save_grab(ctrl.chat, "05_chat_panel.png"))
 

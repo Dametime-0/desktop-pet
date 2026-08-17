@@ -3,7 +3,7 @@
 
 人格包目录结构（personalities/<人格名>/personality.json）：
     {
-      "name": "小晴", "version": "1.0.0", "author": "...",
+      "name": "magic", "version": "1.0.0", "author": "...",
       "personality": { "tone": ..., "speech_style": ..., "catchphrases": [...], "background": ... },
       "memory": { "关键词": {"fact": "记忆内容", "trigger": true/false}, ... },
       "keyword_rules": [ {"keywords": [...], "replies": [...], "action": "...", "weight": N} ],
@@ -140,7 +140,7 @@ class PersonalityManager:
             log.info("已加载人格: %s (%s)", self.current.name, self.current.version)
         except (PersonalityError, OSError, json.JSONDecodeError) as e:
             log.warning("人格加载失败(%s)，使用内置兜底人格", e)
-            self.current = Personality({"name": "小晴", "offline_replies": {
+            self.current = Personality({"name": "magic", "offline_replies": {
                 "default": ["嗯？我在呢，怎么了？"]}}, "")
             self.current_dir = None
         return self.current

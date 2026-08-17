@@ -10,7 +10,7 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 
 def main():
