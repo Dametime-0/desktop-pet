@@ -47,6 +47,7 @@ class AnimController(QObject):
         self._frame_loop = False
         self._frame_mirror = False
         self._frame_action = None
+        self._frame_dir = 1           # 循环播放方向（乒乓往复）
         self._idle_frames = False     # 待机是否由帧动画接管
 
     def set_frame_library(self, lib):
@@ -96,6 +97,7 @@ class AnimController(QObject):
             self._frame_idx = 0
             self._frame_loop = True
             self._frame_action = "idle"
+            self._frame_dir = 1
             self._apply_frame()
             self._frame_timer.start()
             return
@@ -155,6 +157,7 @@ class AnimController(QObject):
         self._frame_loop = False
         self._frame_action = action
         self._frame_mirror = False
+        self._frame_dir = 1
         self._apply_frame()
         self._frame_timer.start()
 
@@ -163,19 +166,31 @@ class AnimController(QObject):
         if not seq:
             self._frame_timer.stop()
             return
-        if self._frame_idx + 1 >= len(seq):
-            if self._frame_loop:
-                self._frame_idx = 0        # 循环（含过渡帧，衔接平滑）
-            else:
-                self._frame_timer.stop()
-                self._frame_set = None
-                self._frame_action = None
-                if self._idle_frames:
-                    self.start_idle()      # 恢复待机帧循环
-                self._on_finished()
+        if self._frame_loop:
+            # 乒乓往复：0→N-1→0，首尾相邻帧相同，衔接零跳变
+            n = len(seq)
+            if n < 2:
                 return
-        else:
-            self._frame_idx += 1
+            if self._frame_dir > 0 and self._frame_idx >= n - 1:
+                self._frame_dir = -1
+                self._frame_idx = n - 2
+            elif self._frame_dir < 0 and self._frame_idx <= 0:
+                self._frame_dir = 1
+                self._frame_idx = 1
+            else:
+                self._frame_idx += self._frame_dir
+            self._apply_frame()
+            return
+        # 一次性动作：播完复位
+        if self._frame_idx + 1 >= len(seq):
+            self._frame_timer.stop()
+            self._frame_set = None
+            self._frame_action = None
+            if self._idle_frames:
+                self.start_idle()      # 恢复待机帧循环
+            self._on_finished()
+            return
+        self._frame_idx += 1
         self._apply_frame()
 
     def start_walk_frames(self, mirror: bool) -> bool:
@@ -192,6 +207,7 @@ class AnimController(QObject):
         self._frame_loop = True
         self._frame_action = "walk"
         self._frame_mirror = mirror
+        self._frame_dir = 1
         self._apply_frame()
         self._frame_timer.start()
         return True

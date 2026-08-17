@@ -105,6 +105,7 @@ class PetWindow(QGraphicsView):
         self._headroom = 0
         self._content_h = content_h
         self._content_w = content_w
+        self._anchor_view()
         self.geometry_changed.emit()
 
     def set_jump_headroom(self, px: float):
@@ -137,7 +138,18 @@ class PetWindow(QGraphicsView):
         self._headroom = px
         self._content_h = content_h
         self._content_w = content_w
+        self._anchor_view()
         self.geometry_changed.emit()
+
+    def _anchor_view(self):
+        """窗口尺寸变化后强制视图锚定到场景左上角。
+
+        防止 QGraphicsView 在缩放/加高后滚动偏移，出现只显示人物
+        局部（如左上四分之一）的渲染异常。
+        """
+        self.horizontalScrollBar().setValue(0)
+        self.verticalScrollBar().setValue(0)
+        self.viewport().update()
 
     def content_geometry(self):
         """形象本体的屏幕矩形（不含边距与顶部跳跃留白），供气泡跟随与面板定位。"""
