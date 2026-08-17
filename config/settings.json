@@ -1,9 +1,9 @@
 {
   "window": {
     "base_height": 240,
-    "scale": 1.272,
-    "x": 683,
-    "y": 518,
+    "scale": 0.805,
+    "x": 815,
+    "y": 124,
     "always_on_top": true,
     "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
   },
@@ -79,5 +79,6 @@
     "_comment": "method: auto=优先rembg(未安装则内置算法)；floodfill=强制内置算法。tolerance 越大抠得越狠"
   },
   "active_personality": "magic",
-  "_comment": "桌宠全局设置。所有路径均为相对路径。可另建 settings.local.json 覆盖本文件（适合存放 API Key，该文件不会提交到 GitHub）。"
+  "_comment": "桌宠全局设置。所有路径均为相对路径。可另建 settings.local.json 覆盖本文件（适合存放 API Key，该文件不会提交到 GitHub）。",
+  "_selftest_marker": null
 }

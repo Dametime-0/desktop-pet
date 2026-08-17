@@ -37,6 +37,9 @@ SAT_MAX, GRAY_MIN, GRAY_MAX = 25, 100, 235
 PROTECT_REGIONS = [(370, 170, 780, 850)]
 # 白晕清理：亮度 ≥ 255 - HALO_TOL 且从边缘连通的像素视为背景残留
 HALO_TOL = 6
+# 白色残留阈值：亮度 ≥ WHITE_TH 且远离人物特征的大块视为背景缝隙/阴影残留
+# （背景缝隙往往带浅灰阴影 235~255；人物主体亮度多在 220 以下，脸部受保护区保护）
+WHITE_TH = 230
 # 闭运算核大小（弥合发丝缝隙）
 CLOSE_KERNEL = 13
 
@@ -154,24 +157,26 @@ def segment(img_rgb: np.ndarray, model: str = "u2net") -> np.ndarray:
         filled[y0:y1, x0:x1] = 1
 
     # 6) 白色残留清理（背景缝隙/脚下阴影被误保留的白块）
-    #    a. 远离非白内容的近白像素（人物特征 5px 以外的白斑）
-    nonwhite = gray < 244
+    #    a. 远离人物特征（深色内容 5px 以外）的浅色像素
+    nonwhite = gray < WHITE_TH
     band = cv2.dilate(nonwhite.astype(np.uint8),
                       cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11)))
-    white_far = (gray >= 244) & (band == 0) & (filled > 0)
+    white_far = (gray >= WHITE_TH) & (band == 0) & (filled > 0)
     for (x0, y0, x1, y1) in PROTECT_REGIONS:
         white_far[y0:y1, x0:x1] = False
     filled[white_far] = 0
-    #    b. 剩余大块近白连通域（面积 >= 800 且不与保护区相交）整体移除
-    ow = ((filled > 0) & (gray >= 244)).astype(np.uint8)
+    #    b. 大块浅色连通域（面积 >= 800）整体移除，但保护区内像素除外——
+    #       逐像素保护：即使白块与面部皮肤连成一个大组件，也只移除保护区外的部分
+    ow = ((filled > 0) & (gray >= WHITE_TH)).astype(np.uint8)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(ow, 8)
+    protected_mask = np.zeros_like(filled, dtype=bool)
+    for (x0, y0, x1, y1) in PROTECT_REGIONS:
+        protected_mask[y0:y1, x0:x1] = True
     n_rm = 0
     for i in range(1, n):
-        x, y, bw, bh, area = stats[i]
-        in_protect = any(x + bw >= x0 and x <= x1 and y + bh >= y0 and y <= y1
-                         for (x0, y0, x1, y1) in PROTECT_REGIONS)
-        if area >= 800 and not in_protect:
-            filled[labels == i] = 0
+        if stats[i, cv2.CC_STAT_AREA] >= 800:
+            comp = (labels == i) & (~protected_mask)
+            filled[comp] = 0
             n_rm += 1
     if n_rm:
         print(f"白色残留块移除 {n_rm} 处")

@@ -62,7 +62,8 @@ class PetController(QObject):
         from .window import PetWindow
         self.window = PetWindow(self.settings)
         self.anims = AnimController(self.window.root_group,
-                                    self.window.pet_item, self.window.scene())
+                                    self.window.pet_item, self.window.scene(),
+                                    headroom_cb=self.window.set_jump_headroom)
         topmost = self.settings.get("window.always_on_top", True)
         self.bubble = BubbleWindow(self.settings.get("bubble") or {}, topmost)
         self.chat = ChatPanel(self.settings, self.persona.current.name,
@@ -108,11 +109,10 @@ class PetController(QObject):
         else:
             self.anims.play("bounce")
             line = self.dialogue.personality.offline_reply("jump")
-        self.chat.open_near(self.window.frameGeometry())
+        self.chat.open_near(self._pet_rect())
         # 气泡避让聊天面板，避免出现"气泡跑到面板另一侧"的错位
         self.bubble.show_text(line)
-        self.bubble.follow(self.window.frameGeometry(),
-                           self._chat_rect_if_visible())
+        self.bubble.follow(self._pet_rect(), self._chat_rect_if_visible())
 
     # ---------- 聊天 ----------
     def handle_chat(self, text: str):
@@ -205,9 +205,12 @@ class PetController(QObject):
         top_act.setCheckable(True)
         top_act.setChecked(self.settings.get("window.always_on_top", True))
         top_act.triggered.connect(self._toggle_topmost)
-        menu.addAction("打开对话面板", lambda: self.chat.open_near(
-            self.window.frameGeometry()))
+        menu.addAction("打开对话面板", lambda: self.chat.open_near(self._pet_rect()))
         menu.addAction("散步", self._start_walk)
+        walk_auto = menu.addAction("空闲自动散步")
+        walk_auto.setCheckable(True)
+        walk_auto.setChecked(self.settings.get("behavior.walk_enabled", True))
+        walk_auto.triggered.connect(self._toggle_auto_walk)
         # 提醒子菜单
         rem_menu = menu.addMenu("提醒")
         rem = self.settings.get("reminders") or {}
@@ -374,11 +377,9 @@ class PetController(QObject):
         return True
 
     def _on_walk_bob(self):
-        """走路时身体轻微上下起伏并小幅度摇摆。"""
+        """走路时身体轻微压伸起伏并小幅度摇摆（底部锚定，不裁头部）。"""
         self._bob_t += 0.09
-        phase = math.sin(self._bob_t * 2.2)
-        self.window.pet_item.setY(-abs(phase) * self.window.height() * 0.03)
-        self.window.pet_item.setRotation(phase * 2.5)
+        self.anims.walk_bob(math.sin(self._bob_t * 2.2))
 
     def _on_walk_done(self):
         self._stop_walk()
@@ -389,12 +390,15 @@ class PetController(QObject):
             self._walk_anim = None
         if self._walk_bob_timer.isActive():
             self._walk_bob_timer.stop()
-        self.window.pet_item.setY(0)
-        self.window.pet_item.setRotation(0)
+        self.anims.walk_bob_reset()
 
     def _on_interaction(self):
         """用户按住宠物时中断走路。"""
         self._stop_walk()
+
+    def _toggle_auto_walk(self, on: bool):
+        self.settings.set("behavior.walk_enabled", bool(on))
+        self._schedule_save()
 
     # ---------- 定时提醒（喝水/活动/休息） ----------
     def _reset_reminder_due(self):
@@ -419,8 +423,7 @@ class PetController(QObject):
             if now >= self._reminder_due.get(key, 0):
                 lines = cfg.get("lines") or [f"{label}时间到啦，休息一下吧"]
                 self.bubble.show_text(random.choice(lines))
-                self.bubble.follow(self.window.frameGeometry(),
-                                   self._chat_rect_if_visible())
+                self.bubble.follow(self._pet_rect(), self._chat_rect_if_visible())
                 action = cfg.get("action", "")
                 if action:
                     self.anims.play(action)
@@ -443,8 +446,12 @@ class PetController(QObject):
     def _chat_rect_if_visible(self):
         return self.chat.frameGeometry() if self.chat.isVisible() else None
 
+    def _pet_rect(self):
+        """形象本体矩形（不含窗口顶部跳跃留白），气泡与面板据此定位。"""
+        return self.window.content_geometry()
+
     def _on_geometry_changed(self):
-        self.bubble.follow(self.window.frameGeometry(), self._chat_rect_if_visible())
+        self.bubble.follow(self._pet_rect(), self._chat_rect_if_visible())
         self._schedule_save()
 
     def _schedule_save(self):

@@ -23,11 +23,13 @@ ACTIONS = ("pat", "bounce", "jump", "spin", "squish", "dance", "shake", "happy")
 
 
 class AnimController(QObject):
-    def __init__(self, root_group, pet_item, scene):
+    def __init__(self, root_group, pet_item, scene, headroom_cb=None):
         super().__init__()
         self.root = root_group
         self.pet = pet_item
         self.scene = scene
+        self._headroom_cb = headroom_cb   # 跳跃时通知窗口临时加高顶部（防头部裁切）
+        self._headroom_px = 0.0
         self._zoom = 1.0
         self._queue = deque()      # 待播放动作队列
         self._busy = False
@@ -109,6 +111,26 @@ class AnimController(QObject):
         """是否有动作动画正在播放（走路等外部动画可据此避让）。"""
         return self._busy
 
+    def _set_jump_headroom(self, px: float):
+        """起跳前向窗口申请顶部留白，落地后（0）释放。"""
+        if self._headroom_cb and px != self._headroom_px:
+            self._headroom_px = px
+            self._headroom_cb(px)
+
+    def walk_bob(self, phase: float):
+        """走路颠簸：底部锚定的呼吸式压伸 + 小幅度摇摆（不产生向上位移，
+        因此不需要顶部留白，也不会裁到头部）。"""
+        z = self._zoom
+        sy = 1.0 + 0.035 * phase
+        sx = 1.0 - 0.02 * abs(phase)
+        self.pet.setTransform(QTransform.fromScale(z * sx, z * sy))
+        self.pet.setRotation(phase * 2.5)
+
+    def walk_bob_reset(self):
+        z = self._zoom
+        self.pet.setTransform(QTransform.fromScale(z, z))
+        self.pet.setRotation(0.0)
+
     def play(self, name: str):
         """请求播放动作。若正在播放则入队（最多保留 2 个），过度请求会被丢弃。"""
         if name not in ACTIONS:
@@ -128,6 +150,7 @@ class AnimController(QObject):
         group.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
 
     def _on_finished(self):
+        self._set_jump_headroom(0)     # 动作结束，释放跳跃留白
         self._busy = False
         if self._queue:
             self._run(self._queue.popleft())
@@ -166,6 +189,7 @@ class AnimController(QObject):
         from PySide6.QtCore import QParallelAnimationGroup, QSequentialAnimationGroup
 
         jump_h = self.pet.boundingRect().height() * self._zoom * 0.22
+        self._set_jump_headroom(jump_h)      # 起跳前给窗口留出头顶空间
         seq = QSequentialAnimationGroup(self)
         seq.addAnimation(self._make(
             110, QEasingCurve.Type.InQuad,
@@ -190,6 +214,7 @@ class AnimController(QObject):
     def _build_jump(self):
         """小跳（彩蛋动作的通用跳跃）。"""
         jump_h = self.pet.boundingRect().height() * self._zoom * 0.14
+        self._set_jump_headroom(jump_h)
         from PySide6.QtCore import QSequentialAnimationGroup
         seq = QSequentialAnimationGroup(self)
         seq.addAnimation(self._make(200, QEasingCurve.Type.OutQuad,
@@ -225,6 +250,7 @@ class AnimController(QObject):
         """跳舞：连续小跳并左右摇摆。"""
         from PySide6.QtCore import QParallelAnimationGroup, QSequentialAnimationGroup
         jump_h = self.pet.boundingRect().height() * self._zoom * 0.12
+        self._set_jump_headroom(jump_h)
         seq = QSequentialAnimationGroup(self)
         for i in range(3):
             lean = self._make(260, QEasingCurve.Type.InOutSine,
@@ -267,7 +293,7 @@ class AnimController(QObject):
             item.setFont(f)
             item.setZValue(10)
             x = r.width() * self._zoom * (0.25 + 0.5 * (i + random.random()) / max(1, n))
-            y = r.height() * self._zoom * 0.08
+            y = -r.height() * self._zoom * 0.82   # 头顶附近（形象上方）
             item.setPos(x - item.boundingRect().width() / 2, y)
             self.scene.addItem(item)
 

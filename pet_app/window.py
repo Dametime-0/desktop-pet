@@ -61,6 +61,8 @@ class PetWindow(QGraphicsView):
         self._pixmap = None
         self._fit_scale = 1.0
         self._user_scale = settings.get("window.scale", 1.0)
+        self._headroom = 0            # 顶部留白（像素），供跳跃等动作使用
+        self._content_h = 1           # 形象本体显示高度（像素）
 
     # ---------- 形象加载与缩放 ----------
     def load_image(self, path: str):
@@ -80,12 +82,49 @@ class PetWindow(QGraphicsView):
         """按 fit × user 缩放图像并同步窗口大小。"""
         if self._pixmap is None:
             return
+        self.set_jump_headroom(0)          # 缩放时取消临时跳跃留白，重新计算
         zoom = self._fit_scale * self._user_scale
         w, h = self._pixmap.width(), self._pixmap.height()
+        content_h = round(h * zoom)
         self.pet_item.setTransform(QTransform.fromScale(zoom, zoom))
         self.root_group.setTransformOriginPoint(w * zoom / 2, h * zoom)
-        self.setFixedSize(round(w * zoom), round(h * zoom))
+        self._scene.setSceneRect(0.0, -content_h, w * zoom, content_h)
+        self.setFixedSize(round(w * zoom), content_h)
+        self._headroom = 0
+        self._content_h = content_h
         self.geometry_changed.emit()
+
+    def set_jump_headroom(self, px: float):
+        """跳跃时临时加高窗口顶部空间（向上扩展），保证头部不被裁切。
+
+        px 为目标留白高度（像素），窗口向上增长并同步场景范围；
+        恢复为 0 时窗口缩回原尺寸并下移还原。跳跃结束后必须调用 0。
+        """
+        if self._pixmap is None:
+            return
+        zoom = self._fit_scale * self._user_scale
+        w, h = self._pixmap.width(), self._pixmap.height()
+        content_h = round(h * zoom)
+        px = max(0, int(round(px)))
+        if px == self._headroom:
+            return
+        d = px - self._headroom
+        # 先移动窗口（向上扩展时同步上移，保持形象贴地）
+        screen = QApplication.screenAt(self.frameGeometry().center()) \
+            or QApplication.primaryScreen()
+        new_y = self.y() - d
+        if new_y >= screen.availableGeometry().top():   # 屏幕顶部空间不足则不移动
+            self.move(self.x(), new_y)
+        self._scene.setSceneRect(0.0, -(content_h + px), w * zoom, content_h + px)
+        self.setFixedSize(round(w * zoom), content_h + px)
+        self._headroom = px
+        self._content_h = content_h
+        self.geometry_changed.emit()
+
+    def content_geometry(self):
+        """形象本体的屏幕矩形（不含顶部跳跃留白），供气泡跟随与面板定位使用。"""
+        geo = self.frameGeometry()
+        return geo.adjusted(0, self._headroom, 0, 0)
 
     def set_user_scale(self, scale: float):
         self._user_scale = max(SCALE_MIN, min(SCALE_MAX, scale))
@@ -122,8 +161,10 @@ class PetWindow(QGraphicsView):
         if event.button() == Qt.MouseButton.LeftButton:
             if not self._dragging and self._press_global is not None:
                 p = event.position().toPoint()
-                self.clicked.emit(p.x() / max(1, self.width()),
-                                  p.y() / max(1, self.height()))
+                # 点击坐标换算到形象本体（去掉顶部留白）
+                fy = (p.y() - self._headroom) / max(1, self._content_h)
+                fy = max(0.0, min(1.0, fy))
+                self.clicked.emit(p.x() / max(1, self.width()), fy)
             self._press_global = None
             self._dragging = False
         super().mouseReleaseEvent(event)

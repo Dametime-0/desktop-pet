@@ -118,6 +118,25 @@ def _test_settings(ctrl, checks):
     _check(checks, "配置读写", ok)
 
 
+def _test_jump_headroom(ctrl, checks):
+    """跳跃留白：窗口应能临时向上扩展并在释放后复原。"""
+    # 等待动画空闲（截图阶段的蹦跳可能尚未结束，避免基准高度含临时留白）
+    waited = 0
+    while ctrl.anims.is_busy() and waited < 3000:
+        loop = QEventLoop()
+        QTimer.singleShot(200, loop.quit)
+        loop.exec()
+        waited += 200
+    base_h = ctrl.window.height()
+    ctrl.window.set_jump_headroom(50)
+    _check(checks, "跳跃留白-窗口加高", ctrl.window.height() == base_h + 50,
+           f"{base_h}->{ctrl.window.height()}")
+    _check(checks, "跳跃留白-场景上移",
+           ctrl.window._headroom == 50 and ctrl.window._content_h == base_h)
+    ctrl.window.set_jump_headroom(0)
+    _check(checks, "跳跃留白-复原", ctrl.window.height() == base_h)
+
+
 def _test_walk(ctrl, checks):
     """走路：窗口应在 1.5s 内发生水平位移，且可被中断。"""
     x0 = ctrl.window.x()
@@ -199,7 +218,7 @@ def run_selftest(app) -> int:
     step(1000, lambda: ctrl.anims.play("pat"))
     step(1600, lambda: _save_grab(ctrl.window, "03_pat.png"))
     step(1700, lambda: ctrl.anims.play("bounce"))
-    step(2300, lambda: _save_grab(ctrl.window, "04_bounce.png"))
+    step(2150, lambda: _save_grab(ctrl.window, "04_bounce.png"))   # 跳跃峰值
     step(2400, lambda: ctrl.chat.open_near(ctrl.window.frameGeometry()))
     step(2500, lambda: ctrl.chat.append_user("magic 你好呀"))
     step(2600, lambda: ctrl.chat.append_pet("你好，我在呢～"))
@@ -210,8 +229,9 @@ def run_selftest(app) -> int:
     step(3300, lambda: _test_matting(checks))
     step(3400, lambda: _test_settings(ctrl, checks))
     step(3450, lambda: _test_bubble_placement(ctrl, checks))
-    step(3500, lambda: _test_walk(ctrl, checks))
-    step(3700, lambda: _test_reminders(ctrl, checks))
+    step(3500, lambda: _test_jump_headroom(ctrl, checks))
+    step(3600, lambda: _test_walk(ctrl, checks))
+    step(3800, lambda: _test_reminders(ctrl, checks))
 
     def finish():
         # 报告打印失败（如编码问题）也不能影响退出
