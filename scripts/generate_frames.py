@@ -41,35 +41,34 @@ from pet_app.utils import assets_dir              # noqa: E402
 API_BASE = "https://api.siliconflow.cn/v1"
 MODEL = "Wan-AI/Wan2.2-I2V-A14B"
 
-# 每个动作的生成参数（提示词按"白底、同角色、循环动作、衣物保持静止"设计）
+# 每个动作的生成参数（提示词强调"缓慢轻柔"——AI 生成的视频动作
+# 幅度与速率完全按提示词控制，不自然通常源于动作过快）
 ACTIONS = {
     "idle": {
         "prompt": "画面中的角色保持完全相同的姿势和外观，安静站立，"
-                  "仅身体随呼吸非常轻微地起伏。衣物、发丝和所有配饰保持静止，"
-                  "不做任何飘动。动作幅度极小，可无缝循环。纯白色背景，无任何文字",
-        "frames": 8,
+                  "身体随呼吸极其缓慢、轻柔地起伏，衣物、发丝和配饰以非常缓慢的"
+                  "速度轻微摆动，动作幅度极小，节奏舒缓自然，"
+                  "可无缝循环。纯白色背景，无任何文字",
     },
     "walk": {
         "prompt": "画面中的角色保持完全相同的姿势和外观，在原地走路的循环步态，"
-                  "身体轻微起伏，双臂小幅自然摆动。衣物和配饰保持静止，"
-                  "不产生额外飘动。可无缝循环，纯白色背景，无任何文字",
-        "frames": 8,
+                  "步态缓慢而自然，身体轻微起伏，双臂小幅摆动，发丝和裙摆缓慢地"
+                  "随之轻摆，节奏舒缓，可无缝循环。纯白色背景，无任何文字",
     },
     "jump": {
-        "prompt": "画面中的角色保持完全相同的姿势和外观，轻轻原地跳起一次再落下，"
-                  "衣物和发丝保持贴合、不夸张飘动，动作流畅自然，"
-                  "纯白色背景，无任何文字",
-        "frames": 6,
+        "prompt": "画面中的角色保持完全相同的姿势和外观，缓慢地轻轻原地跳起一次"
+                  "再落下，裙摆和发丝随之缓慢地轻柔飘动，动作流畅自然，"
+                  "节奏舒缓。纯白色背景，无任何文字",
     },
     "pat": {
         "prompt": "画面中的角色保持完全相同的姿势和外观，被人摸头时开心地眯眼微笑，"
-                  "轻轻点头，衣物保持静止，动作温柔自然，纯白色背景，无任何文字",
-        "frames": 6,
+                  "缓慢地轻轻点头，发丝轻柔微晃，动作温柔自然，"
+                  "节奏舒缓。纯白色背景，无任何文字",
     },
     "happy": {
         "prompt": "画面中的角色保持完全相同的姿势和外观，开心地轻轻拍手，"
-                  "身体微微晃动，衣物保持静止，笑容自然，纯白色背景，无任何文字",
-        "frames": 6,
+                  "身体缓慢地微微晃动，笑容自然，动作轻柔，"
+                  "节奏舒缓。纯白色背景，无任何文字",
     },
 }
 
@@ -108,7 +107,7 @@ def submit_video(api_key, image_path, prompt, size="720x1280") -> str:
         "image": f"data:image/png;base64,{b64}",
         "image_size": size,
         "negative_prompt": "背景复杂，多余物品，文字，水印，多个人，角色外观改变，"
-                           "衣物飘动，布料飞起，配饰晃动，身体变形，手指畸形",
+                           "动作过快，快速晃动，动作幅度过大，身体变形，手指畸形",
     }
     # 官方接口为 /video/submit（若服务端 404 再尝试 /video/submissions）
     for endpoint in ("/video/submit", "/video/submissions"):
@@ -165,9 +164,21 @@ def extract_frames(video_path, count):
     return frames
 
 
-def extract_and_save(video_path, action, frames_n):
-    """从视频抽帧 → AI 语义分割抠图 → 保存帧素材。"""
-    print(f"  抽帧 ×{frames_n} + 逐帧抠图…")
+def extract_and_save(video_path, action, frames_n=None):
+    """从视频按 10fps（与程序播放帧率一致）抽帧 → AI 抠图 → 保存帧素材。
+
+    帧数未指定时按视频时长 × 10fps 计算（上限 60），保证播放速度与
+    AI 生成速度一致。此前固定抽 8 帧会把 5 秒视频压缩成 0.8 秒播放，
+    导致动作速率过快、不自然。
+    """
+    cap = cv2.VideoCapture(video_path)
+    vfps = cap.get(cv2.CAP_PROP_FPS) or 24
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    duration = total / vfps
+    cap.release()
+    if frames_n is None:
+        frames_n = max(8, min(60, int(round(duration * 10))))
+    print(f"  视频 {duration:.1f}s → 抽帧 ×{frames_n}（10fps）+ 逐帧抠图…")
     import process_character as pc
     frames = extract_frames(video_path, frames_n)
     out_dir = os.path.join(assets_dir, "animations", action)
@@ -187,7 +198,8 @@ def extract_and_save(video_path, action, frames_n):
     print(f"  完成 → {out_dir}")
 
 
-def process_action(api_key, image_path, action, cfg, out_root, shots=1):
+def process_action(api_key, image_path, action, cfg, out_root, shots=1,
+                   frames_n=None):
     """单动作：生成视频（可多候选）→ 保留原片 → 抽帧抠图。"""
     raw_dir = os.path.join(assets_dir, "animations", "_raw")
     os.makedirs(raw_dir, exist_ok=True)
@@ -201,7 +213,7 @@ def process_action(api_key, image_path, action, cfg, out_root, shots=1):
         download(url, video)
         print(f"[{label}] 视频已保存（保留原片）: {video}")
         if shots == 1:
-            extract_and_save(video, action, cfg["frames"])
+            extract_and_save(video, action, frames_n)
 
 
 def main():
@@ -242,7 +254,7 @@ def main():
         if not os.path.isfile(video):
             print(f"找不到视频: {video}")
             sys.exit(1)
-        extract_and_save(video, action, frame_override or 8)
+        extract_and_save(video, action, frame_override)
         print("桌宠重启后生效。")
         sys.exit(0)
 
@@ -260,10 +272,9 @@ def main():
     for action, cfg in ACTIONS.items():
         if action_filter and action != action_filter:
             continue
-        if frame_override:
-            cfg = dict(cfg, frames=frame_override)
         try:
-            process_action(api_key, white_bg, action, cfg, assets_dir, shots=shots)
+            process_action(api_key, white_bg, action, cfg, assets_dir,
+                           shots=shots, frames_n=frame_override)
         except Exception as e:                        # noqa: BLE001
             print(f"[{action}] 失败: {e}")
     if shots > 1:
