@@ -71,12 +71,18 @@ class FrameLibrary:
         self.scan()
 
     def scan(self):
-        """扫描 assets/animations/ 目录，重建帧索引。"""
+        """扫描 assets/animations/ 目录，重建帧索引。
+
+        仅识别动作目录（如 idle/walk/jump）；下划线开头的目录
+        （如 _raw 原片存档）自动跳过。
+        """
         self._sets = {}
         root = os.path.join(assets_dir, "animations")
         if not os.path.isdir(root):
             return
         for action in os.listdir(root):
+            if action.startswith("_"):          # _raw 等内部目录不作为动作
+                continue
             d = os.path.join(root, action)
             if not os.path.isdir(d):
                 continue
