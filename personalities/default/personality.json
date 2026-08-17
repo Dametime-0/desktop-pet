@@ -22,7 +22,9 @@
     {"keywords": ["再见", "拜拜", "走了"], "replies": ["主人要走了吗……团子会乖乖等你的！", "拜拜～早点回来找团子玩哦！"], "action": "shake", "weight": 5},
     {"keywords": ["饿", "吃", "食物", "零食"], "replies": ["说到吃的……主人还记得草莓大福吗？嘿嘿🍓", "团子的肚子咕噜噜了～"], "action": "jump", "weight": 6},
     {"keywords": ["摸", "抱", "贴贴", "rua"], "replies": ["嘿嘿，被主人摸头啦～好舒服", "贴贴！团子要和主人贴贴！"], "action": "happy", "weight": 8},
-    {"keywords": ["难过", "伤心", "不开心", "累"], "replies": ["主人不要难过，团子抱抱你～", "累的话就歇一歇，团子陪着你哦"], "action": "squish", "weight": 7}
+    {"keywords": ["难过", "伤心", "不开心", "累"], "replies": ["主人不要难过，团子抱抱你～", "累的话就歇一歇，团子陪着你哦"], "action": "squish", "weight": 7},
+    {"keywords": ["走走", "散步", "溜达"], "replies": ["好呀好呀，团子这就去溜达一圈～"], "action": "walk", "weight": 3},
+    {"keywords": ["挥手"], "replies": ["挥挥～主人看得到团子吗？"], "action": "wave", "weight": 3}
   ],
   "easter_eggs": [
     {"keywords": ["彩蛋"], "replies": ["被你发现啦！奖励团子牌爱心一份～❤"], "action": "happy", "weight": 30},

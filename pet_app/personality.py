@@ -20,13 +20,11 @@ import re
 import shutil
 import zipfile
 
+from .animations import ACTIONS as ACTION_NAMES   # 与动画控制器共用一份动作名
 from .utils import BUNDLED_PERSONALITY_DIR, assets_dir, log, personality_dir
 
 #: 记忆库中这些常见词默认不作为触发关键词（避免几乎每句话都命中）
 MEMORY_STOPWORDS = {"主人", "我", "你", "他", "她", "它", "的", "了", "呢", "吗"}
-
-#: 与人物相关的称呼（用于提示词，不用于触发）
-ACTION_NAMES = ("pat", "bounce", "jump", "spin", "squish", "dance", "shake", "happy")
 
 
 class PersonalityError(Exception):

@@ -97,6 +97,7 @@ class BubbleWindow(QWidget):
 
         self._full_text = ""
         self._shown = 0
+        self._sticky = False       # True=不自动消失（AI 进度气泡等），由调用方 hide_now()
         self._tail_side = SIDE_DOWN
         self._typing_timer = QTimer(self)
         self._typing_timer.timeout.connect(self._tick)
@@ -123,9 +124,13 @@ class BubbleWindow(QWidget):
             self.show()
 
     # ---------- 显示控制 ----------
-    def show_text(self, text: str):
-        """显示新文本（打断当前气泡），逐字打出。位置由调用方随后 follow() 设置。"""
+    def show_text(self, text: str, sticky: bool = False):
+        """显示新文本（打断当前气泡），逐字打出。位置由调用方随后 follow() 设置。
+
+        sticky=True 时打完不自动消失（用于 AI 进度提示），由调用方 hide_now() 结束。
+        """
         self._full_text = text or ""
+        self._sticky = sticky
         self._shown = 0
         self._typing_timer.stop()
         if self._fade is not None:
@@ -149,6 +154,8 @@ class BubbleWindow(QWidget):
         self._adjust_size()
         if self._shown >= len(self._full_text):
             self._typing_timer.stop()
+            if self._sticky:      # 进度模式：不自动消失
+                return
             per_char = float(self._style.get("duration_per_char_ms", 95))
             dur = max(int(self._style.get("min_duration_ms", 2600)),
                       int(len(self._full_text) * per_char))

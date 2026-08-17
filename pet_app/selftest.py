@@ -11,6 +11,7 @@ import sys
 
 from PIL import Image, ImageDraw
 from PySide6.QtCore import QBuffer, QIODevice, QTimer
+from PySide6.QtGui import QGuiApplication
 
 from . import matting
 from .controller import PetController
@@ -158,6 +159,91 @@ def _test_bubble_position(checks):
     _check(checks, "气泡定位-极端空间不越屏", area.contains(rect), f"rect={rect}")
 
 
+def _test_style_heuristic(checks):
+    """风格启发式：高/宽 >= 1.15 判人物（含边界值）。"""
+    from . import character_ai
+    cases = [((300, 300), "cartoon"), ((200, 420), "humanoid"),
+             ((400, 220), "cartoon"), ((100, 114), "cartoon"),
+             ((100, 115), "humanoid")]
+    for i, (size, expect) in enumerate(cases):
+        img = Image.new("RGBA", size, (255, 255, 255, 255))
+        p = os.path.join(OUT_DIR, f"_style_{i}.png")
+        img.save(p)
+        got = character_ai.guess_style(p)
+        os.remove(p)
+        _check(checks, f"风格启发式{size}->{expect}", got == expect, got)
+
+
+def _test_prompt_build(checks):
+    """提示词构建：特征注入、硬性要求关键词、空字段跳过。"""
+    from . import character_ai
+    ch = {"hair_color": "银白色 #E8E8F0", "hair_style": "及腰银发+齐刘海",
+          "eye_color": "蓝色", "outfit": "白色连衣裙",
+          "color_palette": ["白", "蓝"], "accessories": "蝴蝶结",
+          "posture": "站姿", "full_body": None, "is_humanoid": True,
+          "extra_notes": ""}
+    prompt = character_ai.build_generation_prompt(ch)
+    _check(checks, "生成提示词-特征注入",
+           "银白色" in prompt and "白色连衣裙" in prompt and "蝴蝶结" in prompt,
+           prompt[:60])
+    _check(checks, "生成提示词-硬性要求",
+           all(k in prompt for k in ("二头身", "浅蓝", "全身", "纯色背景")))
+    empty = {k: "" for k in ch}
+    empty["color_palette"] = []
+    prompt2 = character_ai.build_generation_prompt(empty)
+    _check(checks, "生成提示词-空字段跳过",
+           "None" not in prompt2 and "发色：" not in prompt2)
+    vp = character_ai.build_vision_prompt()
+    _check(checks, "视觉提示词-字段",
+           "hair_color" in vp and "full_body" in vp and "is_humanoid" in vp)
+
+
+def _test_parse_character_json(checks):
+    """角色描述解析：纯 JSON / 围栏 / 尾文本 / 缺省补全 / 非法抛出。"""
+    from . import character_ai
+    data = character_ai.parse_character_json(
+        '{"hair_color": "粉色", "color_palette": ["粉", "白"]}')
+    _check(checks, "解析-纯JSON+缺省补全",
+           data["hair_color"] == "粉色" and data["eye_color"] == ""
+           and isinstance(data["color_palette"], list))
+    data = character_ai.parse_character_json(
+        '```json\n{"hair_color": "金发"}\n```\n（以上为分析结果）')
+    _check(checks, "解析-围栏+尾文本", data["hair_color"] == "金发")
+    data = character_ai.parse_character_json('```\n{"hair_color": "黑发"}\n```')
+    _check(checks, "解析-无语言围栏", data["hair_color"] == "黑发")
+    try:
+        character_ai.parse_character_json("没有 JSON 的输出内容")
+        _check(checks, "解析-非法抛出", False)
+    except character_ai.CharacterAIError:
+        _check(checks, "解析-非法抛出", True)
+
+
+def _test_action_names(checks):
+    """动作名同步：animations 与 personality 一致，未知动作被过滤。"""
+    from . import animations
+    from .personality import ACTION_NAMES, Personality
+    for action in ("walk", "wave", "bow", "pat"):
+        _check(checks, f"动作名同步-{action}",
+               action in animations.ACTIONS and action in ACTION_NAMES)
+    p = Personality({"name": "测试", "keyword_rules": [
+        {"keywords": ["走走"], "replies": ["好的"], "action": "walk"},
+        {"keywords": ["飞"], "replies": ["……"], "action": "fly"},
+    ]}, "")
+    rules = {tuple(r["keywords"]): r for r in p.rules}
+    _check(checks, "动作名过滤-walk保留", rules[("走走",)]["action"] == "walk")
+    _check(checks, "动作名过滤-fly清空", rules[("飞",)]["action"] == "")
+
+
+def _test_walk_clamp(checks):
+    """走路平移钳制：界内原值、左右边界、副屏负坐标。"""
+    from PySide6.QtCore import QRect
+    from .window import clamp_x
+    screen = QRect(-1920, 0, 1920, 1040)      # 副屏场景：left=-1920，right=-1（闭区间）
+    _check(checks, "走路钳制-界内", clamp_x(-500, 200, screen) == -500)
+    _check(checks, "走路钳制-右边界", clamp_x(5000, 200, screen) == -201)
+    _check(checks, "走路钳制-左边界", clamp_x(-5000, 200, screen) == -1920)
+
+
 def run_selftest(app) -> int:
     os.makedirs(OUT_DIR, exist_ok=True)
     ctrl = PetController(app)
@@ -174,16 +260,45 @@ def run_selftest(app) -> int:
     step(1600, lambda: _save_grab(ctrl.window, "03_pat.png"))
     step(1700, lambda: ctrl.anims.play("bounce"))
     step(2300, lambda: _save_grab(ctrl.window, "04_bounce.png"))
-    step(2400, lambda: ctrl.chat.open_near(ctrl.window.frameGeometry()))
-    step(2500, lambda: ctrl.chat.append_user("团子你好呀"))
-    step(2600, lambda: ctrl.chat.append_pet("主人好！团子在哦～"))
-    step(3000, lambda: _save_grab(ctrl.chat, "05_chat_panel.png"))
+
+    # ---- 人物风格动作验证：居中后走路（避免顶到屏幕边缘）----
+    walk_x0 = [0]
+
+    def _center_window():
+        screen = QGuiApplication.primaryScreen().availableGeometry()
+        ctrl.window.move(screen.center().x() - ctrl.window.width() // 2,
+                         screen.center().y() - ctrl.window.height() // 2)
+
+    # 时间轴说明：bounce(1700 入队，约 2940 结束) → walk 排队约 2940 开始（3 步 840ms）
+    step(2400, lambda: (_center_window(),
+                        walk_x0.__setitem__(0, ctrl.window.x()),
+                        ctrl.anims.set_style("humanoid"),
+                        ctrl.anims.play("walk")))
+    step(3350, lambda: _check(checks, "人物风格-走路位移",
+                              abs(ctrl.window.x() - walk_x0[0]) > 10,
+                              f"dx={ctrl.window.x() - walk_x0[0]}"))
+    step(3450, lambda: (_save_grab(ctrl.window, "05b_humanoid_walk.png"),
+                        ctrl.anims.play("wave")))
+    step(5300, lambda: _save_grab(ctrl.window, "05c_wave.png"))
+    step(6400, lambda: ctrl.anims.play("bow"))
+    step(6850, lambda: _save_grab(ctrl.window, "05d_bow.png"))
+
+    # ---- 聊天面板截图 ----
+    step(6900, lambda: ctrl.chat.open_near(ctrl.window.frameGeometry()))
+    step(7000, lambda: ctrl.chat.append_user("团子你好呀"))
+    step(7100, lambda: ctrl.chat.append_pet("主人好！团子在哦～"))
+    step(7500, lambda: _save_grab(ctrl.chat, "05_chat_panel.png"))
 
     # ---- 逻辑断言 ----
-    step(3200, lambda: _test_dialogue(ctrl, checks))
-    step(3300, lambda: _test_matting(checks))
-    step(3400, lambda: _test_settings(ctrl, checks))
-    step(3450, lambda: _test_bubble_position(checks))
+    step(7600, lambda: _test_dialogue(ctrl, checks))
+    step(7700, lambda: _test_matting(checks))
+    step(7800, lambda: _test_settings(ctrl, checks))
+    step(7850, lambda: _test_bubble_position(checks))
+    step(7900, lambda: _test_style_heuristic(checks))
+    step(7950, lambda: _test_prompt_build(checks))
+    step(8000, lambda: _test_parse_character_json(checks))
+    step(8050, lambda: _test_action_names(checks))
+    step(8100, lambda: _test_walk_clamp(checks))
 
     def finish():
         # 报告打印失败（如编码问题）也不能影响退出
@@ -198,10 +313,11 @@ def run_selftest(app) -> int:
         except Exception as e:                    # noqa: BLE001
             print("SELFTEST REPORT ERROR:", repr(e))
         finally:
+            ctrl.anims.set_style("cartoon")      # 还原默认风格
             ctrl.bubble.hide_now()
             ctrl.chat.hide()
             ctrl.window.hide()
             app.exit(0 if not failed else 1)
 
-    step(3600, finish)
+    step(8300, finish)
     return app.exec()

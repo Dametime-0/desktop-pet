@@ -2,8 +2,8 @@
   "window": {
     "base_height": 240,
     "scale": 0.75,
-    "x": 612,
-    "y": 515,
+    "x": 605,
+    "y": 365,
     "always_on_top": true,
     "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
   },
@@ -46,6 +46,33 @@
     "method": "auto",
     "tolerance": 32,
     "_comment": "method: auto=优先rembg(未安装则内置算法)；floodfill=强制内置算法。tolerance 越大抠得越狠"
+  },
+  "image_gen": {
+    "enabled": true,
+    "base_url": "https://api.siliconflow.cn/v1",
+    "api_key": "",
+    "model": "Kwai-Kolors/Kolors",
+    "image_size": "768x1024",
+    "batch_size": 1,
+    "guidance_scale": 7.5,
+    "num_inference_steps": 30,
+    "seed": -1,
+    "timeout": 120,
+    "_comment": "文生图（OpenAI 兼容 POST /images/generations）。默认硅基流动 Kolors。改用 OpenAI 时：model=gpt-image-1, image_size=1024x1536（程序按模型名自动切换请求/响应格式）。seed=-1 表示随机。api_key 留空则 AI 生成选项不可用"
+  },
+  "vision": {
+    "enabled": true,
+    "base_url": "https://api.siliconflow.cn/v1",
+    "api_key": "",
+    "model": "Qwen/Qwen2.5-VL-72B-Instruct",
+    "timeout": 60,
+    "max_tokens": 512,
+    "temperature": 0.2,
+    "_comment": "视觉分析（多模态 chat/completions，image_url 传 data URL）。默认硅基流动 Qwen2.5-VL；OpenAI 用 model=gpt-4o-mini。api_key 留空则 AI 生成选项不可用"
+  },
+  "animation": {
+    "style": "auto",
+    "_comment": "动画风格: auto=按图片宽高比自动判断(高/宽>=1.15 判人物); cartoon=卡通弹性(Q弹压扁,适合团子); humanoid=人物动作(轻呼吸+摇摆/走/挥手/鞠躬)。AI 生成形象后自动置为 humanoid。可在右键菜单切换"
   },
   "active_personality": "团子",
   "_comment": "桌宠全局设置。所有路径均为相对路径。可另建 settings.local.json 覆盖本文件（适合存放 API Key，该文件不会提交到 GitHub）。"

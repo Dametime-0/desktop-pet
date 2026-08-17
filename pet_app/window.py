@@ -10,13 +10,20 @@
 变换锚点均为"底部中心"，缩放时宠物像站在地上一样。
 """
 from PySide6.QtCore import Qt, Signal, QPoint
-from PySide6.QtGui import QPainter, QPixmap, QTransform
+from PySide6.QtGui import QGuiApplication, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsItemGroup,
                                QGraphicsPixmapItem, QGraphicsScene, QGraphicsView)
 
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 
 SCALE_MIN, SCALE_MAX = 0.25, 3.0
+
+
+def clamp_x(x: int, width: int, screen_rect) -> int:
+    """把窗口 x 坐标钳制到指定屏幕可用区域内（支持副屏负坐标）。"""
+    left = screen_rect.left()
+    right = screen_rect.right() - width
+    return max(left, min(x, right))
 
 
 class PetWindow(QGraphicsView):
@@ -26,6 +33,7 @@ class PetWindow(QGraphicsView):
     dropped_image = Signal(str)             # 拖入图片文件
     context_menu_requested = Signal(QPoint)  # 右键菜单（全局坐标）
     geometry_changed = Signal()             # 移动/缩放，用于气泡跟随与状态保存
+    drag_started = Signal()                 # 用户开始拖动（用于中断走路等动作）
 
     def __init__(self, settings):
         super().__init__()
@@ -109,7 +117,9 @@ class PetWindow(QGraphicsView):
         if event.buttons() & Qt.MouseButton.LeftButton and self._press_global:
             cur = event.globalPosition().toPoint()
             if (cur - self._press_global).manhattanLength() > QApplication.startDragDistance():
-                self._dragging = True
+                if not self._dragging:      # 拖动开始：通知外部中断走路等动作
+                    self._dragging = True
+                    self.drag_started.emit()
             if self._dragging:
                 self.move(self.pos() + cur - self._press_global)
                 self._press_global = cur
@@ -150,6 +160,24 @@ class PetWindow(QGraphicsView):
                 self.dropped_image.emit(path)
                 break
         event.acceptProposedAction()
+
+    # ---------- 走路平移 ----------
+    def walk(self, dx_px: float) -> int:
+        """水平平移窗口（走路动作驱动），按当前所在屏幕钳制。
+
+        返回实际移动的像素数（0 表示已顶到屏幕边界）。
+        """
+        if dx_px == 0:
+            return 0
+        geo = self.frameGeometry()
+        screen = QGuiApplication.screenAt(geo.center()) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        target = clamp_x(round(self.x() + dx_px), self.width(), area)
+        moved = target - self.x()
+        if moved:
+            self.move(target, self.y())
+            self.geometry_changed.emit()
+        return moved
 
     # ---------- 窗口状态 ----------
     def set_topmost(self, on: bool):
