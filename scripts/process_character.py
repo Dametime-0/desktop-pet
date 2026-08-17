@@ -162,9 +162,16 @@ def main():
         sys.exit(1)
     src = sys.argv[1]
     keep_wm = "--keep-watermark" in sys.argv
-    model = "u2net"
+    model = "auto"
     if "--model" in sys.argv:
         model = sys.argv[sys.argv.index("--model") + 1]
+    if model == "auto":                    # 自动选择本地已有模型
+        home = os.path.expanduser("~")
+        if os.path.isfile(os.path.join(home, ".u2net", "isnet-general-use.onnx")):
+            model = "isnet-general-use"
+        elif os.path.isfile(os.path.join(home, ".u2net", "u2net.onnx")):
+            model = "u2net"
+    print(f"抠图模型: {model}")
     if not os.path.isfile(src):
         print(f"找不到图片: {src}")
         sys.exit(1)
