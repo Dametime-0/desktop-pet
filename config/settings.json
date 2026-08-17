@@ -1,9 +1,9 @@
 {
   "window": {
     "base_height": 240,
-    "scale": 1.426,
-    "x": 635,
-    "y": 347,
+    "scale": 2.088,
+    "x": 1317,
+    "y": 363,
     "always_on_top": true,
     "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
   },
@@ -40,7 +40,7 @@
     "auto_idle": true,
     "idle_min_s": 18,
     "idle_max_s": 45,
-    "walk_enabled": true,
+    "walk_enabled": false,
     "walk_range_px": 180,
     "walk_speed_px_s": 70,
     "_comment": "空闲时自言自语/散步/小动作；walk_range_px=散步范围，walk_speed_px_s=散步速度"

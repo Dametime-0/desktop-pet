@@ -103,7 +103,31 @@ def _luma_flood_mask(gray: np.ndarray, tol: int) -> np.ndarray:
     return ff[2:-2, 2:-2] > 0
 
 
-def segment(img_rgb: np.ndarray, model: str = "u2net") -> np.ndarray:
+_SESSION_CACHE = {}
+
+
+def resolve_model(explicit: str = "auto") -> str:
+    """auto 时选择本地已有模型（isnet 优先）。"""
+    if explicit not in ("", "auto"):
+        return explicit
+    home = os.path.expanduser("~")
+    if os.path.isfile(os.path.join(home, ".u2net", "isnet-general-use.onnx")):
+        return "isnet-general-use"
+    if os.path.isfile(os.path.join(home, ".u2net", "u2net.onnx")):
+        return "u2net"
+    return "u2net"
+
+
+def _get_session(model: str):
+    """缓存 rembg 会话（模型加载开销大，逐帧抠图必须复用）。"""
+    if model not in _SESSION_CACHE:
+        from rembg import new_session
+        _SESSION_CACHE[model] = new_session(model)
+    return _SESSION_CACHE[model]
+
+
+def segment(img_rgb: np.ndarray, model: str = "u2net",
+            verbose: bool = True) -> np.ndarray:
     """智能抠图，返回 0-255 的 alpha 数组（保证人物完整）。
 
     以 rembg(isnet) 语义分割为主——它能正确区分"人物身上的白色内容"
@@ -119,15 +143,18 @@ def segment(img_rgb: np.ndarray, model: str = "u2net") -> np.ndarray:
     model_path = os.path.join(os.path.expanduser("~"), ".u2net", f"{model}.onnx")
     if os.path.isfile(model_path):
         try:
-            from rembg import new_session, remove
+            from rembg import remove
             out = remove(Image.fromarray(img_rgb),
-                         session=new_session(model)).convert("RGBA")
+                         session=_get_session(model)).convert("RGBA")
             ub_a = np.asarray(out.getchannel("A"))
-            print(f"rembg({model}) 掩码完成")
+            if verbose:
+                print(f"rembg({model}) 掩码完成")
         except Exception as e:                        # noqa: BLE001
-            print(f"rembg 失败({e})，退回 flood-fill")
+            if verbose:
+                print(f"rembg 失败({e})，退回 flood-fill")
     else:
-        print(f"未找到模型 {model_path}，跳过 rembg（首次运行会自动下载）")
+        if verbose:
+            print(f"未找到模型 {model_path}，跳过 rembg（首次运行会自动下载）")
 
     if ub_a is not None:
         base = ub_a.copy()          # rembg 返回只读数组，这里需要写入
@@ -186,15 +213,8 @@ def main():
         sys.exit(1)
     src = sys.argv[1]
     keep_wm = "--keep-watermark" in sys.argv
-    model = "auto"
-    if "--model" in sys.argv:
-        model = sys.argv[sys.argv.index("--model") + 1]
-    if model == "auto":                    # 自动选择本地已有模型
-        home = os.path.expanduser("~")
-        if os.path.isfile(os.path.join(home, ".u2net", "isnet-general-use.onnx")):
-            model = "isnet-general-use"
-        elif os.path.isfile(os.path.join(home, ".u2net", "u2net.onnx")):
-            model = "u2net"
+    model = resolve_model(sys.argv[sys.argv.index("--model") + 1]
+                          if "--model" in sys.argv else "auto")
     print(f"抠图模型: {model}")
     if not os.path.isfile(src):
         print(f"找不到图片: {src}")
