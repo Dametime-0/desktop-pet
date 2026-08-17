@@ -192,11 +192,7 @@ class ChatPanel(QWidget):
 
     # ---------- 显示位置 ----------
     def open_near(self, pet_rect):
-        """在宠物附近打开面板：优先右侧，其次左侧，最后屏幕内任意。
-
-        垂直方向与宠物顶部对齐（而非居中），给宠物头顶上方的气泡留出空间，
-        避免面板遮挡气泡。
-        """
+        """在宠物附近打开面板：优先右侧，其次左侧，最后屏幕内任意。"""
         screen = QGuiApplication.screenAt(pet_rect.center()) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry()
         x = pet_rect.right() + 16
@@ -204,8 +200,8 @@ class ChatPanel(QWidget):
             x = pet_rect.left() - self.width() - 16
             if x < area.left():
                 x = max(area.left() + 8, area.right() - self.width() - 8)
-        y = pet_rect.top() - 8
-        y = min(max(area.top() + 8, y), area.bottom() - self.height() - 8)
+        y = min(max(area.top() + 8, pet_rect.center().y() - self.height() // 2),
+                area.bottom() - self.height() - 8)
         self.move(round(x), round(y))
         self.show()
         self.raise_()

@@ -1,81 +1,23 @@
 # -*- coding: utf-8 -*-
-"""文字气泡窗口：悬浮于宠物四周（不遮挡主体），逐字显示、自动消失。
+"""文字气泡窗口：悬浮于宠物周边（不遮挡主体），逐字显示、自动消失。
 
-- 独立顶层窗口 + WA_TransparentForMouseEvents，气泡完全不拦截鼠标；
-- 样式（颜色/字体/圆角/透明度/速度等）全部由 config/settings.json 的 bubble 节控制；
-- 定位策略 _choose_rect：按 上 → 下 → 右 → 左 顺序找第一个「在屏幕内且不与
-  避让窗口（对话面板）重叠」的位置，尾巴始终指向宠物（上下左右四向）；
-- 每次显示文本后由控制器调用 follow() 重新定位，宠物移动/缩放时同步跟随。
+定位策略（修复贴边错位问题）：
+- 候选方位依次尝试：上方 → 下方 → 右侧 → 左侧，优先选"完整落在屏幕内
+  且不与聊天面板重叠"的位置；
+- 气泡尺寸随文字变化，任何尺寸变化都会触发重新定位（此前长文本把气泡
+  "顶"离宠物的 bug 由此修复）；
+- 尾巴锚点始终指向宠物中心，即使气泡被屏幕边缘裁切也保持视觉连接；
+- 样式（颜色/字体/圆角/透明度/速度等）全部由 config/settings.json 的
+  bubble 节控制；气泡鼠标穿透，绝不拦截点击。
 """
-from PySide6.QtCore import (QEasingCurve, QPropertyAnimation, QRect, Qt, QTimer)
+from PySide6.QtCore import (QEasingCurve, QPropertyAnimation, QRect, Qt,
+                            QTimer)
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QGuiApplication,
                            QPainter, QPainterPath)
 from PySide6.QtWidgets import QLabel, QWidget
 
-TAIL = 10          # 气泡尾巴长度
-MARGIN = 10        # 与宠物窗口/避让窗口的间距
-
-#: 尾巴方向（尾巴指向宠物一侧）
-SIDE_DOWN = "down"      # 气泡在宠物上方
-SIDE_UP = "up"          # 气泡在宠物下方
-SIDE_LEFT = "left"      # 气泡在宠物右侧（尾巴朝左）
-SIDE_RIGHT = "right"    # 气泡在宠物左侧（尾巴朝右）
-
-
-def choose_rect(pet_rect: QRect, size, area: QRect, avoid_rect=None):
-    """挑选气泡位置：返回 (气泡矩形, 尾巴方向)。
-
-    依次尝试 上/下/右/左 四个候选位，要求完整落在屏幕可用区域内、
-    且不与避让窗口（如对话面板）重叠；全部冲突时退回上方并横向平移避开面板。
-    纯函数，便于单元测试。
-    """
-    bw, bh = size.width(), size.height()
-    pc = pet_rect.center()
-
-    def clamp(r: QRect) -> QRect:
-        r = QRect(r)
-        r.setWidth(min(bw, area.width()))
-        r.setHeight(min(bh, area.height()))
-        if r.right() > area.right():
-            r.moveRight(area.right())
-        if r.left() < area.left():
-            r.moveLeft(area.left())
-        if r.bottom() > area.bottom():
-            r.moveBottom(area.bottom())
-        if r.top() < area.top():
-            r.moveTop(area.top())
-        return r
-
-    candidates = [
-        (QRect(pc.x() - bw // 2, pet_rect.top() - bh - MARGIN, bw, bh), SIDE_DOWN),
-        (QRect(pc.x() - bw // 2, pet_rect.bottom() + MARGIN, bw, bh), SIDE_UP),
-        (QRect(pet_rect.right() + MARGIN, pet_rect.top() + pet_rect.height() // 4 - bh // 2,
-               bw, bh), SIDE_LEFT),
-        (QRect(pet_rect.left() - bw - MARGIN, pet_rect.top() + pet_rect.height() // 4 - bh // 2,
-               bw, bh), SIDE_RIGHT),
-    ]
-    for rect, side in candidates:
-        rect = clamp(rect)
-        if rect.intersects(pet_rect):              # 不得遮挡宠物本体
-            continue
-        if avoid_rect is not None and rect.intersects(avoid_rect):
-            continue
-        return rect, side
-
-    # 全部冲突（宠物与面板之间空间狭小）：退回上方，向远离面板的一侧平移
-    rect = clamp(QRect(candidates[0][0]))
-    if rect.intersects(pet_rect):
-        rect.moveBottom(pet_rect.top() - MARGIN)   # 被钳进宠物时抬回宠物上方
-        rect = clamp(rect)
-    if avoid_rect is not None and rect.intersects(avoid_rect):
-        if pc.x() < avoid_rect.center().x():
-            rect.moveRight(avoid_rect.left() - MARGIN)
-        else:
-            rect.moveLeft(avoid_rect.right() + MARGIN)
-    rect = clamp(rect)
-    if rect.intersects(pet_rect):                  # 空间实在不够时，退到屏幕同侧边缘
-        rect.moveTopRight(area.topRight().translated(-MARGIN, MARGIN))
-    return clamp(rect), SIDE_DOWN
+TAIL = 10          # 气泡尾巴高度
+MARGIN = 10        # 与宠物窗口的间距
 
 
 class BubbleWindow(QWidget):
@@ -97,8 +39,10 @@ class BubbleWindow(QWidget):
 
         self._full_text = ""
         self._shown = 0
-        self._sticky = False       # True=不自动消失（AI 进度气泡等），由调用方 hide_now()
-        self._tail_side = SIDE_DOWN
+        self._flipped = False        # True=气泡显示在宠物下方（尾巴朝上）
+        self._tail_x = None          # 尾巴在气泡上的 x 位置（锚定宠物中心）
+        self._pet_rect = None        # 宠物窗口矩形（用于重新定位）
+        self._avoid = None           # 需要避让的矩形（聊天面板）
         self._typing_timer = QTimer(self)
         self._typing_timer.timeout.connect(self._tick)
         self._fade = None
@@ -124,13 +68,9 @@ class BubbleWindow(QWidget):
             self.show()
 
     # ---------- 显示控制 ----------
-    def show_text(self, text: str, sticky: bool = False):
-        """显示新文本（打断当前气泡），逐字打出。位置由调用方随后 follow() 设置。
-
-        sticky=True 时打完不自动消失（用于 AI 进度提示），由调用方 hide_now() 结束。
-        """
+    def show_text(self, text: str):
+        """显示新文本（打断当前气泡），逐字打出。"""
         self._full_text = text or ""
-        self._sticky = sticky
         self._shown = 0
         self._typing_timer.stop()
         if self._fade is not None:
@@ -145,17 +85,18 @@ class BubbleWindow(QWidget):
             self._adjust_size()
             self.show()
             self.raise_()
+            if self._pet_rect is not None:
+                self.follow(self._pet_rect, self._avoid)   # 新文本尺寸变了，重新贴回宠物
             self._typing_timer.start(interval)
 
     def _tick(self):
         """逐字显示，完成后安排自动消失。"""
         self._shown = min(len(self._full_text), self._shown + self._chars_per_tick)
         self._label.setText(self._full_text[:self._shown])
-        self._adjust_size()
+        if self._adjust_size() and self._pet_rect is not None:
+            self.follow(self._pet_rect, self._avoid)   # 尺寸随打字增长 → 贴回宠物
         if self._shown >= len(self._full_text):
             self._typing_timer.stop()
-            if self._sticky:      # 进度模式：不自动消失
-                return
             per_char = float(self._style.get("duration_per_char_ms", 95))
             dur = max(int(self._style.get("min_duration_ms", 2600)),
                       int(len(self._full_text) * per_char))
@@ -187,17 +128,12 @@ class BubbleWindow(QWidget):
         self.setWindowOpacity(1.0)
 
     # ---------- 布局与绘制 ----------
-    def _body_rect(self) -> QRect:
-        """气泡主体（不含尾巴）在窗口内的矩形。"""
-        w, h = self.width(), self.height()
-        x = TAIL if self._tail_side == SIDE_LEFT else 0
-        y = TAIL if self._tail_side == SIDE_UP else 0
-        bw = w - (TAIL if self._tail_side in (SIDE_LEFT, SIDE_RIGHT) else 0)
-        bh = h - (TAIL if self._tail_side in (SIDE_UP, SIDE_DOWN) else 0)
-        return QRect(x, y, bw, bh)
+    def _adjust_size(self) -> bool:
+        """按当前已显示文本计算气泡尺寸。
 
-    def _adjust_size(self):
-        """按当前已显示文本与尾巴方向计算气泡尺寸。"""
+        返回 True 表示尺寸发生变化（调用方应随后调用 follow 重新贴回宠物）。
+        注意：本方法不调用 follow，follow 也不调用本方法，避免互相递归。
+        """
         fm = QFontMetrics(self._label.font())
         max_w = int(self._style.get("max_width", 280))
         rect = fm.boundingRect(0, 0, max_w, 10000,
@@ -206,15 +142,19 @@ class BubbleWindow(QWidget):
         pad = self._pad
         w = max(40, min(max_w, rect.width() + 4) + pad * 2)
         h = rect.height() + pad * 2
-        body = QRect(TAIL if self._tail_side == SIDE_LEFT else 0,
-                     TAIL if self._tail_side == SIDE_UP else 0, w, h)
-        self.setFixedSize(body.width() + (TAIL if self._tail_side in (SIDE_LEFT, SIDE_RIGHT) else 0),
-                          body.height() + (TAIL if self._tail_side in (SIDE_UP, SIDE_DOWN) else 0))
-        self._label.setGeometry(body.x() + pad, body.y() + pad - 2,
-                                w - pad * 2, h)
+        new_size = (w, h + TAIL)
+        changed = new_size != (self.width(), self.height())
+        self.setFixedSize(*new_size)
+        self._relayout_label(w, h, pad)
+        return changed
+
+    def _relayout_label(self, w: int, h: int, pad: int):
+        """仅重排标签位置（尾巴翻转时留出上方空间）。"""
+        top = TAIL if self._flipped else 0
+        self._label.setGeometry(pad, top + pad - 2, w - pad * 2, h)
 
     def paintEvent(self, event):
-        """圆角矩形气泡 + 指向宠物的小尾巴（四向）。"""
+        """圆角矩形气泡 + 指向宠物的小尾巴（尾巴 x 由 _tail_x 锚定宠物）。"""
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         s = self._style
@@ -226,44 +166,81 @@ class BubbleWindow(QWidget):
         border = QColor(s.get("border_color", "#F5B8C8"))
         border.setAlphaF(opacity)
 
-        body = self._body_rect()
+        w, h = self.width(), self.height()
+        top = TAIL if self._flipped else 0
         path = QPainterPath()
-        path.addRoundedRect(body.x(), body.y(), body.width(), body.height(),
-                            radius, radius)
+        path.addRoundedRect(0, top, w, h - TAIL, radius, radius)
         if s.get("show_tail", True):
-            side, t = self._tail_side, TAIL
-            cx, cy = body.center().x(), body.center().y()
-            if side == SIDE_DOWN:        # 尾巴在底部，朝下指
-                path.moveTo(cx - t / 2, body.bottom() + 1)
-                path.lineTo(cx + t / 2, body.bottom() + 1)
-                path.lineTo(cx, body.bottom() + t - 1)
-            elif side == SIDE_UP:        # 尾巴在顶部，朝上指
-                path.moveTo(cx - t / 2, body.top() - 1)
-                path.lineTo(cx + t / 2, body.top() - 1)
-                path.lineTo(cx, body.top() - t + 1)
-            elif side == SIDE_LEFT:      # 尾巴在左侧，朝左指
-                path.moveTo(body.left() - 1, cy - t / 2)
-                path.lineTo(body.left() - 1, cy + t / 2)
-                path.lineTo(body.left() - t + 1, cy)
-            else:                        # 尾巴在右侧，朝右指
-                path.moveTo(body.right() + 1, cy - t / 2)
-                path.lineTo(body.right() + 1, cy + t / 2)
-                path.lineTo(body.right() + t - 1, cy)
+            cx = self._tail_x if self._tail_x is not None else w / 2
+            cx = max(TAIL, min(cx, w - TAIL))
+            if self._flipped:
+                path.moveTo(cx - TAIL / 2, top)
+                path.lineTo(cx + TAIL / 2, top)
+                path.lineTo(cx, top - TAIL + 1)
+            else:
+                body_h = h - TAIL
+                path.moveTo(cx - TAIL / 2, body_h)
+                path.lineTo(cx + TAIL / 2, body_h)
+                path.lineTo(cx, body_h + TAIL - 1)
             path.closeSubpath()
         p.fillPath(path, bg)
         p.setPen(border)
         p.drawPath(path)
 
-    # ---------- 跟随宠物 ----------
-    def follow(self, pet_rect: QRect, avoid_rect: QRect = None):
-        """将气泡定位到宠物四周最合适的位置（见 choose_rect），需气泡可见。"""
+    # ---------- 跟随宠物（核心定位逻辑） ----------
+    def follow(self, pet_rect, avoid_rect=None):
+        """把气泡放到宠物旁边：上方 → 下方 → 右侧 → 左侧，要求完整在屏幕内
+        且不与聊天面板（avoid_rect）重叠；都不满足则退化为贴边钳制。
+
+        气泡隐藏时也记录 pet_rect/avoid_rect，便于下次显示直接定位。
+        """
+        self._pet_rect = QRect(pet_rect)
+        self._avoid = QRect(avoid_rect) if avoid_rect is not None else None
         if not self.isVisible():
             return
-        screen = QGuiApplication.screenAt(pet_rect.center()) or QGuiApplication.primaryScreen()
-        area = screen.availableGeometry().adjusted(4, 4, -4, -4)
-        rect, side = choose_rect(pet_rect, self.size(), area, avoid_rect)
-        if side != self._tail_side:
-            self._tail_side = side
-            self._adjust_size()          # 尾巴方向变化时重排内部布局
+        screen = QGuiApplication.screenAt(self._pet_rect.center()) \
+            or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        w, h = self.width(), self.height()
+        pcx = self._pet_rect.center().x()
+        pcy = self._pet_rect.center().y()
+
+        # 候选方位：(说明, 左x, 上y, 是否翻转)
+        candidates = [
+            ("above", pcx - w / 2, self._pet_rect.top() - h - MARGIN, False),
+            ("below", pcx - w / 2, self._pet_rect.bottom() + MARGIN, True),
+            ("right", self._pet_rect.right() + MARGIN, pcy - h / 2, False),
+            ("left", self._pet_rect.left() - w - MARGIN, pcy - h / 2, False),
+        ]
+        for _side, bx, by, flipped in candidates:
+            rect = QRect(round(bx), round(by), w, h)
+            if (rect.left() < area.left() or rect.right() > area.right()
+                    or rect.top() < area.top() or rect.bottom() > area.bottom()):
+                continue                               # 屏幕外 → 换方位
+            if self._avoid is not None and rect.intersects(self._avoid.adjusted(2, 2, -2, -2)):
+                continue                               # 挡住聊天面板 → 换方位
+            self._place(rect, flipped, pcx)
+            return
+
+        # 兜底：贴边钳制，尽量对齐宠物中心
+        x = pcx - w / 2
+        y = self._pet_rect.top() - h - MARGIN
+        flipped = False
+        if y < area.top():
+            y = self._pet_rect.bottom() + MARGIN
+            flipped = True
+        x = max(area.left() + 4, min(x, area.right() - w - 4))
+        y = max(area.top() + 4, min(y, area.bottom() - h - 4))
+        self._place(QRect(round(x), round(y), w, h), flipped, pcx)
+
+    def _place(self, rect: QRect, flipped: bool, pet_center_x: float):
+        """落地位置：设置翻转方向、尾巴锚点、重排标签并移动。
+
+        仅重排标签（不重算尺寸），与 _adjust_size 解耦，避免递归。
+        """
+        self._flipped = flipped
+        # 尾巴 x = 宠物中心在气泡上的投影（钳制在气泡范围内）
+        self._tail_x = max(TAIL, min(pet_center_x - rect.left(), rect.width() - TAIL))
+        self._relayout_label(self.width(), self.height() - TAIL, self._pad)
         self.move(rect.topLeft())
         self.update()

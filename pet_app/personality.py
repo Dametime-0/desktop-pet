@@ -3,7 +3,7 @@
 
 人格包目录结构（personalities/<人格名>/personality.json）：
     {
-      "name": "团子", "version": "1.0.0", "author": "...",
+      "name": "小晴", "version": "1.0.0", "author": "...",
       "personality": { "tone": ..., "speech_style": ..., "catchphrases": [...], "background": ... },
       "memory": { "关键词": {"fact": "记忆内容", "trigger": true/false}, ... },
       "keyword_rules": [ {"keywords": [...], "replies": [...], "action": "...", "weight": N} ],
@@ -20,11 +20,13 @@ import re
 import shutil
 import zipfile
 
-from .animations import ACTIONS as ACTION_NAMES   # 与动画控制器共用一份动作名
 from .utils import BUNDLED_PERSONALITY_DIR, assets_dir, log, personality_dir
 
 #: 记忆库中这些常见词默认不作为触发关键词（避免几乎每句话都命中）
-MEMORY_STOPWORDS = {"主人", "我", "你", "他", "她", "它", "的", "了", "呢", "吗"}
+MEMORY_STOPWORDS = {"我", "你", "他", "她", "它", "的", "了", "呢", "吗", "我们", "你们"}
+
+#: 与人物相关的称呼（用于提示词，不用于触发）
+ACTION_NAMES = ("pat", "bounce", "jump", "spin", "squish", "dance", "shake", "happy")
 
 
 class PersonalityError(Exception):
@@ -61,7 +63,7 @@ class Personality:
             entry = value if isinstance(value, dict) else {"fact": str(value)}
             if entry.get("trigger", len(key) >= 2 and key not in MEMORY_STOPWORDS):
                 fact = entry.get("fact", "")
-                reply = entry.get("reply") or f"诶嘿，主人问起「{key}」啦？团子记得清清楚楚：{fact}～"
+                reply = entry.get("reply") or f"你问起「{key}」啦？我当然记得——{fact}～"
                 self.rules.append({
                     "keywords": [key.lower()],
                     "replies": [reply],
@@ -138,8 +140,8 @@ class PersonalityManager:
             log.info("已加载人格: %s (%s)", self.current.name, self.current.version)
         except (PersonalityError, OSError, json.JSONDecodeError) as e:
             log.warning("人格加载失败(%s)，使用内置兜底人格", e)
-            self.current = Personality({"name": "团子", "offline_replies": {
-                "default": ["嗯嗯，团子在哦～"]}}, "")
+            self.current = Personality({"name": "小晴", "offline_replies": {
+                "default": ["嗯？我在呢，怎么了？"]}}, "")
             self.current_dir = None
         return self.current
 

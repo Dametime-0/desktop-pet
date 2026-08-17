@@ -10,23 +10,23 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "1.1.0"
+VERSION = "2.0.0"
 
 
 def main():
     os.chdir(ROOT)
     sys.path.insert(0, ROOT)
 
-    # 1) 确保默认形象与图标存在（assets/pet.png 优先使用用户当前形象）
-    from pet_app.default_image import draw_default_pet
+    # 1) 确保形象与图标存在（打包时随包分发 assets/pet.png 当前形象）
     assets = os.path.join(ROOT, "assets")
     os.makedirs(assets, exist_ok=True)
     img_path = os.path.join(assets, "pet.png")
     if os.path.isfile(img_path):
         print("[1/3] 使用现有形象 assets/pet.png")
     else:
-        draw_default_pet().save(img_path)
-        print("[1/3] 已生成默认形象 assets/pet.png")
+        print("错误：缺少 assets/pet.png，请先运行 "
+              "python scripts/process_character.py <图片路径>")
+        sys.exit(1)
     ico_path = os.path.join(assets, "pet.ico")
     if not os.path.isfile(ico_path):
         from PIL import Image

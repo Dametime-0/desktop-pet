@@ -17,7 +17,7 @@ def main() -> int:
     app.setApplicationName("DesktopPet")
     app.setQuitOnLastWindowClosed(False)     # 气泡/面板关闭不代表退出程序
 
-    from pet_app.default_image import ensure_icon
+    from pet_app.assets import ensure_icon
     app.setWindowIcon(QIcon(ensure_icon()))
 
     # 单实例保护：桌宠同时只运行一个

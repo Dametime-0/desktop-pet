@@ -17,7 +17,7 @@ NAME_PATTERNS = [
     re.compile(r"我(?:的?名字)?(?:叫|是)\s*([一-龥A-Za-z0-9_]{1,12})"),
     re.compile(r"叫我\s*([一-龥A-Za-z0-9_]{1,12})"),
 ]
-NAME_FILLERS = {"你", "团子", "我", "他", "她", "它", "谁", "啥", "什么", "是", "叫"}
+NAME_FILLERS = {"你", "我", "他", "她", "它", "谁", "啥", "什么", "是", "叫"}
 
 # 离线分类词表（顺序即优先级）
 CLASSIFIERS = [
@@ -77,7 +77,7 @@ class DialogueEngine:
                 if name and name not in NAME_FILLERS:
                     self._settings.set("chat.user_name", name)
                     self._settings.save()
-                    return f"记住啦！以后团子就叫你「{name}」～", "happy"
+                    return f"记住啦！以后我就叫你「{name}」～", "happy"
         # 2) 关键词彩蛋（含记忆库）
         rule = self.match_rule(text)
         if rule:

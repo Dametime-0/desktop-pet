@@ -55,30 +55,6 @@ DEFAULT_SETTINGS = {
         "method": "auto",          # auto=优先rembg，不可用则内置flood-fill；floodfill=强制内置算法
         "tolerance": 32,           # 背景容差，抠图不干净可调大/调小
     },
-    "image_gen": {                 # 文生图（OpenAI 兼容 POST /images/generations）
-        "enabled": True,
-        "base_url": "https://api.siliconflow.cn/v1",   # 默认硅基流动
-        "api_key": "",             # 留空则 AI 生成不可用
-        "model": "Kwai-Kolors/Kolors",
-        "image_size": "768x1024",  # OpenAI 用 gpt-image-1 时改 1024x1536
-        "batch_size": 1,
-        "guidance_scale": 7.5,
-        "num_inference_steps": 30,
-        "seed": -1,                # -1 表示随机
-        "timeout": 120,
-    },
-    "vision": {                    # 视觉分析（多模态 chat/completions）
-        "enabled": True,
-        "base_url": "https://api.siliconflow.cn/v1",
-        "api_key": "",             # 留空则 AI 生成不可用
-        "model": "Qwen/Qwen2.5-VL-72B-Instruct",   # OpenAI 用 gpt-4o-mini
-        "timeout": 60,
-        "max_tokens": 512,
-        "temperature": 0.2,
-    },
-    "animation": {
-        "style": "auto",           # auto=按图片宽高比判定；cartoon=卡通弹性；humanoid=人物动作
-    },
     "active_personality": "default",
 }
 

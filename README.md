@@ -12,11 +12,10 @@
 
 | 模块 | 说明 |
 | --- | --- |
-| 形象 | 支持导入 JPG/PNG，自动抠图去背景（内置 flood-fill 算法，装了 rembg 可自动用 AI 抠图）；也支持直接拖图片到宠物身上 |
-| AI 形象 | 上传任意图片 → 视觉模型分析角色特征 → 文生图生成**完整全身 Q 版立绘** → 自动抠图换装；失败自动降级为直接抠图 |
+| 形象 | 人形角色（内置小晴）；支持导入 JPG/PNG，自动抠图去背景（内置 flood-fill 算法，装了 rembg 可自动用 AI 抠图）；也支持直接拖图片到宠物身上；`scripts/process_character.py` 支持素材去水印+抠图预处理 |
 | 窗口 | 透明无边框、默认置顶；左键拖动位置、滚轮缩放大小、位置与大小自动记忆 |
-| 动画 | 两套风格：**卡通弹性**（团子式 Q 弹压扁）与**人物动作**（呼吸摇摆/走路/挥手/鞠躬/摸头/蹦跳），按形象自动判断，也可手动切换 |
-| 气泡 | 点击互动弹出文字气泡，逐字显示、自动消失、悬浮宠物四周不遮挡主体，样式全部可在配置中修改 |
+| 动画 | 空闲呼吸摇摆、点击头部摸头（压扁回弹+爱心）、点击身体轻戳（蹦跳），另有转圈/跳舞/压扁/摇头等彩蛋动作，动作队列保证过渡流畅 |
+| 气泡 | 点击互动弹出文字气泡，逐字显示、自动消失；自动在宠物上/下/左/右选取不遮挡主体、不压住聊天面板且完整在屏幕内的位置，尾巴始终指向宠物，样式全部可在配置中修改 |
 | 对话 | 「人格 JSON + 大模型 API」架构；离线时自动降级到本地对话库，无网络也能互动 |
 | 人格包 | 右键菜单一键导入/导出人格包（zip），人格包可携带形象图片，方便互相分享 |
 | 打包 | 一键脚本打包为单文件夹绿色版 + zip 压缩包，解压双击 exe 即运行 |
@@ -27,7 +26,7 @@
 
 ### 方式一：绿色版（推荐给普通用户）
 
-1. 解压 `桌宠绿色版_v1.0.0.zip` 到任意目录（建议非系统盘，如 `D:\桌宠`）；
+1. 解压 `桌宠绿色版_v2.0.0.zip` 到任意目录（建议非系统盘，如 `D:\桌宠`）；
 2. 双击 `DesktopPet.exe`；
 3. 桌宠出现在屏幕右下角，开箱即用。
 
@@ -57,7 +56,7 @@ python main.py --selftest
 | 左键按住拖动 | 移动桌宠位置 |
 | 滚轮 | 缩放大小（25% ~ 300%） |
 | 左键单击头部 | 摸头动画 + 爱心 + 气泡台词，并打开对话面板 |
-| 左键单击身体 | 蹦跳动画 + 气泡台词，并打开对话面板 |
+| 左键单击身体 | 轻戳反馈（蹦跳动画）+ 气泡台词，并打开对话面板 |
 | 右键 | 菜单：大小调整 / 置顶开关 / 打开对话面板 / 更换形象 / 导入·导出人格包 / 打开人格文件夹 / 退出 |
 | 拖图片到桌宠上 | 自动抠图并更换形象 |
 | 聊天框输入后 Enter | 发送消息（命中关键词优先彩蛋，否则走大模型，离线走本地库） |
@@ -74,6 +73,16 @@ python main.py --selftest
 2. **拖拽导入**：把图片文件直接拖到桌宠身上；
 3. **手动替换**：用任意工具（如 PS 抠图）处理好透明 PNG 后，覆盖 `assets/pet.png`（同目录结构），重启程序生效。
 
+素材预处理（开发者）：带水印或纯色背景的立绘可一条命令处理——自动去除
+SAMPLE 类半透明灰字水印（连通域检测 + cv2 修复）并抠图：
+
+```bat
+python -m pip install opencv-python-headless   :: 仅处理素材时需要
+python scripts\process_character.py D:\素材.jpg
+:: 产物：assets/pet.png（形象）+ assets/pet.ico（图标）
+:: 水印位置可调整脚本顶部 WATERMARK_BAND / HALF_WIDTH 参数
+```
+
 抠图参数在 `config/settings.json` 的 `matting` 节：
 
 ```json
@@ -88,75 +97,6 @@ python main.py --selftest
 
 ---
 
-## ✨ AI 形象完善（可选，不配也能用）
-
-上传的二次元人物图往往不是完整全身（半身、特写、裁剪），AI 模式会自动完善：
-
-1. **视觉模型**分析图片 → 提取发色/发型/瞳色/服装/标志性配色/配饰等结构化特征；
-2. 按特征构造提示词 → **文生图模型**生成「全身二头身 Q 版立绘」（约定纯浅蓝色背景）；
-3. 内置抠图（浅蓝背景提示 + 边角校验回退）→ 保存为新形象，**自动切换「人物动作」动画风格**。
-
-### 使用流程
-
-- 拖图片到桌宠 / 右键「更换形象…」→ 弹窗三选一：**AI 生成 Q 版形象 / 仅抠图直接使用 / 取消**；
-- 选择 AI 生成后，进度通过气泡显示（分析 → 绘制 → 抠图），全程后台执行不卡界面；
-- 任一步失败都会弹窗说明原因，并自动降级为「仅抠图直接使用」；
-- 未配置 AI 时弹窗会提示配置位置，「AI 生成」按钮置灰。
-
-### 配置（config/settings.json，key 建议放 settings.local.json）
-
-```json
-"image_gen": {
-  "enabled": true,
-  "base_url": "https://api.siliconflow.cn/v1",   // 默认硅基流动
-  "api_key": "sk-你的密钥",
-  "model": "Kwai-Kolors/Kolors",
-  "image_size": "768x1024",
-  "guidance_scale": 7.5,
-  "num_inference_steps": 30,
-  "seed": -1,
-  "timeout": 120
-},
-"vision": {
-  "enabled": true,
-  "base_url": "https://api.siliconflow.cn/v1",
-  "api_key": "sk-你的密钥",
-  "model": "Qwen/Qwen2.5-VL-72B-Instruct",
-  "timeout": 60
-}
-```
-
-支持的服务商（OpenAI 兼容 `/images/generations` 与多模态 `/chat/completions`）：
-
-| 服务 | image_gen 示例 | vision 示例 |
-| --- | --- | --- |
-| 硅基流动（默认） | `base_url=https://api.siliconflow.cn/v1`，`model=Kwai-Kolors/Kolors` | `model=Qwen/Qwen2.5-VL-72B-Instruct` |
-| OpenAI | `base_url=https://api.openai.com/v1`，`model=gpt-image-1`，`image_size=1024x1536` | `model=gpt-4o-mini` |
-| 智谱 | `base_url=https://open.bigmodel.cn/api/paas/v4`，`model=cogview-3-flash` | `model=glm-4v-plus` |
-
-程序按模型名自动切换请求格式（`gpt-image` 走 OpenAI 结构，其余走硅基流动结构），
-并兼容 `images[0].url` / `data[0].b64_json` / `data[0].url` 三种响应。
-
-> **费用与耗时**：每次 AI 生成调用 2 次 API（视觉分析 + 文生图，失败自动重试 1 次），
-> 全程约 1 分钟。文生图返回的临时链接在请求内即时下载，不会过期。
-> `image_gen.enabled=false` 或 `api_key` 留空即可完全关闭该功能。
-
----
-
-## 🎬 动画风格
-
-| 风格 | 适用形象 | 表现 |
-| --- | --- | --- |
-| 卡通弹性 cartoon | 团子类圆润形象 | Q 弹压扁、弹性回弹、大幅度摇摆 |
-| 人物动作 humanoid | Q 版立绘人物 | 轻微呼吸、幅度收敛；支持**走路**（真实水平移动窗口，屏幕边缘自动停下，拖动即中断）、**挥手**（钟摆式摇摆）、**鞠躬**（绕脚踝前倾） |
-
-- **自动判定**：`animation.style=auto` 时按图片比例判断——高/宽 ≥ 1.15 判为人物，否则卡通；
-  AI 生成的形象会自动设为 humanoid；
-- **手动切换**：右键 →「动画风格」→ 自动 / 卡通弹性 / 人物动作（立即生效并记忆）；
-- 全部 11 种动作名：`pat / bounce / jump / spin / squish / dance / shake / happy / walk / wave / bow`。
-
----
-
 ## 🧬 人格配置文件修改教程
 
 所有人格配置都在 `personalities/<人格名>/personality.json`，**改完重启生效**，无需改任何代码。
@@ -165,24 +105,24 @@ python main.py --selftest
 
 ```json
 {
-  "name": "团子",
-  "version": "1.0.0",
+  "name": "小晴",
+  "version": "2.0.0",
   "author": "你自己",
 
   "personality": {
-    "tone": "软萌、元气、治愈系",                       // 性格基调
-    "speech_style": "短句、语气词多、句尾爱用～",          // 说话语气
-    "catchphrases": ["团子在这里哟～"],                   // 常用口头禅
-    "background": "一只由主人想象力捏出来的小团子"          // 角色背景
+    "tone": "温柔体贴、成熟可靠的大姐姐",                    // 性格基调
+    "speech_style": "语调温柔，爱用啦、哦、呢等语气词",        // 说话语气
+    "catchphrases": ["我在呢，随时都在"],                   // 常用口头禅
+    "background": "住在你桌面上的邻家大姐姐"                  // 角色背景
   },
 
   "memory": {                                          // 专属记忆库
-    "草莓大福": {"fact": "团子最爱的食物", "trigger": true},
-    "主人": {"fact": "摸头手法天下第一", "trigger": false}
+    "咖啡": {"fact": "小晴工作前总要喝一杯热咖啡", "trigger": true},
+    "你": {"fact": "是小晴最重要的人", "trigger": false}
   },
 
   "keyword_rules": [                                   // 关键词触发规则
-    {"keywords": ["生日"], "replies": ["生日快乐！！🎂"],
+    {"keywords": ["生日"], "replies": ["生日快乐呀！🎂"],
      "action": "dance", "weight": 20}
   ],
 
@@ -191,9 +131,9 @@ python main.py --selftest
   ],
 
   "offline_replies": {                                 // 离线对话库（按句子类别）
-    "greeting": ["主人来啦～"],
-    "question": ["团子想想哦……"],
-    "default": ["嗯嗯？团子在听哦～"]
+    "greeting": ["嗨，你来啦～今天过得怎么样？"],
+    "question": ["让我想想哦……"],
+    "default": ["嗯？我在听呢，继续说～"]
   }
 }
 ```
@@ -204,7 +144,7 @@ python main.py --selftest
 | --- | --- |
 | `personality.*` | 注入大模型的角色设定：性格基调、语气风格、口头禅、背景故事 |
 | `memory` | 专属记忆库。`trigger: true` 的词命中即触发回忆台词；`false` 只注入提示词。值也可写成 `{"fact": "...", "reply": "自定义台词", "action": "happy", "trigger": true}` |
-| `keyword_rules` | 关键词触发规则：输入命中 `keywords` 任一子串即触发，多条命中取 `weight` 最高者；`action` 可选 `pat / bounce / jump / spin / squish / dance / shake / happy / walk / wave / bow` |
+| `keyword_rules` | 关键词触发规则：输入命中 `keywords` 任一子串即触发，多条命中取 `weight` 最高者；`action` 可选 `pat / bounce / jump / spin / squish / dance / shake / happy` |
 | `easter_eggs` | 彩蛋台词，机制与关键词规则一致（命中即彩蛋+动作） |
 | `offline_replies` | 离线兜底库，支持类别：`greeting / bye / thanks / praise / comfort / question / pat / jump / idle / default` |
 
@@ -262,7 +202,7 @@ pyinstaller desktop_pet.spec --noconfirm
 产物：
 
 - `dist/桌宠绿色版/` — 单文件夹绿色版（内含 DesktopPet.exe，全部依赖已内嵌）；
-- `dist/桌宠绿色版_v1.0.0.zip` — 压缩包，发给接收方**解压双击 exe 即用**。
+- `dist/桌宠绿色版_v2.0.0.zip` — 压缩包，发给接收方**解压双击 exe 即用**。
 
 > 打包前如已通过菜单更换过形象，`assets/pet.png` 即当前形象，会一并打包。
 > 未使用 UPX 压缩，避免杀毒软件误报。
@@ -279,16 +219,15 @@ desktop-pet/
 ├── requirements.txt
 ├── pet_app/                   # 核心代码
 │   ├── controller.py          # 总控：组装与交互接线
-│   ├── window.py              # 透明置顶窗口（拖动/缩放/右键菜单/走路平移）
-│   ├── animations.py          # 动画控制器（双风格/待机/摸头/蹦跳/走路/挥手/鞠躬）
-│   ├── bubble.py              # 文字气泡（逐字显示/自动消失/四向避让跟随）
+│   ├── window.py              # 透明置顶窗口（拖动/缩放/右键菜单）
+│   ├── animations.py          # 动画控制器（待机/摸头/蹦跳/彩蛋动作）
+│   ├── bubble.py              # 文字气泡（逐字显示/自动消失/跟随）
 │   ├── chat_panel.py          # 对话面板 + 后台请求线程
-│   ├── character_ai.py        # AI 形象：视觉分析/文生图提示词/生成流水线
 │   ├── dialogue.py            # 离线对话引擎（关键词/分类匹配）
-│   ├── llm_client.py          # OpenAI 兼容 API 客户端（聊天+文生图，标准库实现）
+│   ├── llm_client.py          # OpenAI 兼容 API 客户端（标准库实现）
 │   ├── personality.py         # 人格包加载/导入/导出
-│   ├── matting.py             # 自动抠图（flood-fill / rembg / 背景色提示）
-│   ├── default_image.py       # 内置默认形象绘制
+│   ├── matting.py             # 自动抠图（flood-fill / rembg）
+│   ├── assets.py              # 形象/图标资源定位
 │   ├── config.py              # 全局配置读写
 │   └── utils.py               # 路径/日志工具
 ├── personalities/             # 人格包目录（可任意增删）
@@ -297,7 +236,9 @@ desktop-pet/
 ├── assets/                    # 形象与图标
 │   ├── pet.png                # 当前形象（替换/导入都会更新它）
 │   └── pet.ico
-└── scripts/build.py           # 打包脚本
+└── scripts/
+    ├── build.py               # 打包脚本
+    └── process_character.py   # 素材处理（去水印+抠图）
 ```
 
 **绿色版目录说明**：打包后的 `桌宠绿色版/` 中，出厂副本（assets、personalities、config、
@@ -341,21 +282,7 @@ PyInstaller 打包的 exe 偶发误报（未加壳未混淆），添加信任即
 把它拖回来即可；位置保存后重启会校验是否在屏幕内，不在则回到主屏右下角。
 
 **Q10：想恢复出厂设置？**
-删除 `config/settings.json`（程序会自动重建默认配置）；删除 `assets/pet.png` 则恢复默认形象。
-
-**Q11：AI 形象生成失败怎么办？**
-查看日志 `config/logs/app.log`。常见原因：api_key 无效（提示 HTTP 4xx）、
-网络不通/超时（提示 URLError）、余额不足（HTTP 429/402）。任一步失败都会自动降级为
-直接抠图使用，不影响其他功能。
-
-**Q12：不想用 AI 生成 / 怕误触扣费？**
-把 `config/settings.json` 中 `image_gen.enabled` 与 `vision.enabled` 设为 `false`，
-或保持 `api_key` 留空——导入弹窗中的「AI 生成」按钮会置灰，永远只走抠图流程。
-
-**Q13：AI 生成的形象和手动抠图有什么区别？**
-AI 生成：不完整的人物会被补全为全身 Q 版立绘，动画自动切换为「人物动作」风格；
-手动抠图：图片什么样形象就是什么样（半身图仍是半身），风格按图片比例自动判定，
-也可右键手动切换。两者可随时通过再次导入互相覆盖。
+删除 `config/settings.json`（程序会自动重建默认配置）；删除 `assets/pet.png` 后重启，则恢复随包内置形象（小晴）。
 
 ---
 
