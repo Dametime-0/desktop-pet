@@ -119,6 +119,45 @@ def _test_settings(ctrl, checks):
     _check(checks, "配置读写", ok)
 
 
+def _test_bubble_position(checks):
+    """气泡定位回归：宠物靠屏幕右边、面板在其左侧时，气泡必须避开面板且不越屏。"""
+    from PySide6.QtCore import QRect, QSize
+    from .bubble import choose_rect, SIDE_DOWN, SIDE_UP
+    area = QRect(0, 0, 1920, 1040)
+    size = QSize(200, 60)
+
+    # 1) 无面板：默认在宠物上方
+    pet = QRect(1700, 900, 120, 240)
+    rect, side = choose_rect(pet, size, area)
+    _check(checks, "气泡定位-默认上方",
+           side == SIDE_DOWN and rect.bottom() <= pet.top() and area.contains(rect),
+           f"rect={rect}")
+
+    # 2) 面板在宠物左侧（用户报告的 bug 场景）：气泡不得与面板重叠
+    panel = QRect(1400, 900, 340, 430)      # 宠物右侧空间不足，面板翻转到左侧
+    rect, side = choose_rect(pet, size, area, panel)
+    _check(checks, "气泡定位-避开左侧面板",
+           not rect.intersects(panel) and area.contains(rect),
+           f"rect={rect} side={side}")
+    # 气泡需贴近宠物（与宠物包围盒或宠物+面板外接区域相邻）
+    union = pet.united(panel)
+    _check(checks, "气泡定位-贴近宠物",
+           rect.adjusted(-30, -30, 30, 30).intersects(pet),
+           f"rect={rect} pet={pet}")
+
+    # 3) 宠物贴屏幕顶部：气泡翻转到下方
+    pet_top = QRect(900, 0, 120, 240)
+    rect, side = choose_rect(pet_top, size, area)
+    _check(checks, "气泡定位-顶部翻转下方",
+           side == SIDE_UP and rect.top() >= pet_top.bottom() and area.contains(rect),
+           f"rect={rect} side={side}")
+
+    # 4) 面板完全围住宠物（极小空间）：仍必须返回屏幕内位置
+    panel_full = QRect(1600, 800, 400, 500)
+    rect, side = choose_rect(pet, size, area, panel_full)
+    _check(checks, "气泡定位-极端空间不越屏", area.contains(rect), f"rect={rect}")
+
+
 def run_selftest(app) -> int:
     os.makedirs(OUT_DIR, exist_ok=True)
     ctrl = PetController(app)
@@ -144,6 +183,7 @@ def run_selftest(app) -> int:
     step(3200, lambda: _test_dialogue(ctrl, checks))
     step(3300, lambda: _test_matting(checks))
     step(3400, lambda: _test_settings(ctrl, checks))
+    step(3450, lambda: _test_bubble_position(checks))
 
     def finish():
         # 报告打印失败（如编码问题）也不能影响退出

@@ -1,9 +1,9 @@
 {
   "window": {
     "base_height": 240,
-    "scale": 1.0,
-    "x": -1,
-    "y": -1,
+    "scale": 0.75,
+    "x": 612,
+    "y": 515,
     "always_on_top": true,
     "_comment": "base_height=宠物基准高度(像素)；scale=缩放倍率；x/y=-1 表示未记录位置"
   },

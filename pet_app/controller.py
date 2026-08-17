@@ -81,6 +81,18 @@ class PetController(QObject):
         return llm_client.build_system_prompt(
             self.persona.current, self.settings.get("chat.user_name", ""))
 
+    # ---------- 气泡辅助 ----------
+    def _say(self, text: str):
+        """显示气泡并立即定位到宠物旁（每次显示都重新定位，避免位置陈旧）。"""
+        self.bubble.show_text(text)
+        self._reposition_bubble()
+
+    def _reposition_bubble(self):
+        """气泡定位：避让对话面板（可见时），并置于面板之上。"""
+        avoid = self.chat.frameGeometry() if self.chat.isVisible() else None
+        self.bubble.follow(self.window.frameGeometry(), avoid)
+        self.bubble.raise_()
+
     # ---------- 宠物点击 ----------
     def _on_click(self, fx: float, fy: float):
         """点击：上半身摸头 / 下半身蹦跳，并打开对话面板。"""
@@ -90,8 +102,9 @@ class PetController(QObject):
         else:
             self.anims.play("bounce")
             line = self.dialogue.personality.offline_reply("jump")
-        self.bubble.show_text(line)
+        self._say(line)
         self.chat.open_near(self.window.frameGeometry())
+        self._reposition_bubble()      # 面板刚出现，需按避让规则再次定位
 
     # ---------- 聊天 ----------
     def handle_chat(self, text: str):
@@ -217,10 +230,10 @@ class PetController(QObject):
                                         int(cfg.get("tolerance", 32)))
             self.window.load_image(dst)
             self.anims.set_zoom(self.window._fit_scale * self.window.user_scale())
-            self.bubble.show_text("新形象加载好啦～团子觉得超好看！")
+            self._say("新形象加载好啦～团子觉得超好看！")
         except Exception as e:                    # noqa: BLE001 导入失败不能崩溃
             log.error("形象导入失败: %s", e)
-            self.bubble.show_text("图片处理失败……换一张试试？")
+            self._say("图片处理失败……换一张试试？")
 
     # ---------- 人格包 ----------
     def _choose_import_pack(self):
@@ -236,11 +249,11 @@ class PetController(QObject):
             if result.get("image"):
                 self.window.load_image(result["image"])
                 self.anims.set_zoom(self.window._fit_scale * self.window.user_scale())
-            self.bubble.show_text(f"人格「{result['name']}」加载好啦！")
+            self._say(f"人格「{result['name']}」加载好啦！")
             self.chat._title.setText(f"💬 {result['name']}")
         except (PersonalityError, OSError, ValueError) as e:
             log.warning("人格包导入失败: %s", e)
-            self.bubble.show_text(f"人格包导入失败：{e}")
+            self._say(f"人格包导入失败：{e}")
 
     def _choose_export_pack(self):
         name = self.persona.current.name if self.persona.current else "personality"
@@ -251,16 +264,16 @@ class PetController(QObject):
         if path:
             try:
                 self.persona.export_pack(path)
-                self.bubble.show_text("人格包导出成功～可以分享给朋友啦！")
+                self._say("人格包导出成功～可以分享给朋友啦！")
             except (PersonalityError, OSError) as e:
-                self.bubble.show_text(f"导出失败：{e}")
+                self._say(f"导出失败：{e}")
 
     def _open_personality_dir(self):
         target = self.persona.current_dir or personality_dir
         try:
             os.startfile(target)
         except OSError:
-            self.bubble.show_text("打不开文件夹……")
+            self._say("打不开文件夹……")
 
     def _reload_persona(self, name: str):
         self.persona.load(name)
@@ -277,14 +290,14 @@ class PetController(QObject):
         if self.settings.get("behavior.auto_idle", True):
             r = random.random()
             if r < 0.4:
-                self.bubble.show_text(self.dialogue.idle_line())
+                self._say(self.dialogue.idle_line())
             elif r > 0.55:
                 self.anims.play(random.choice(("jump", "squish", "shake")))
         self._schedule_idle()
 
     # ---------- 状态保存 / 退出 ----------
     def _on_geometry_changed(self):
-        self.bubble.follow(self.window.frameGeometry())
+        self._reposition_bubble()
         self._schedule_save()
 
     def _schedule_save(self):
