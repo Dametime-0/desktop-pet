@@ -93,18 +93,20 @@ class FrameSet:
 class FrameLibrary:
     """全部动作帧素材的集合与查询。"""
 
-    def __init__(self):
+    def __init__(self, root: str = None):
+        #: 帧素材根目录（测试可传入临时目录，绝不触碰真实素材）
+        self.root = root or os.path.join(assets_dir, "animations")
         self._sets = {}
         self.scan()
 
     def scan(self):
-        """扫描 assets/animations/ 目录，重建帧索引。
+        """扫描帧素材根目录，重建帧索引。
 
         仅识别动作目录（如 idle/walk/jump）；下划线开头的目录
         （如 _raw 原片存档）自动跳过。
         """
         self._sets = {}
-        root = os.path.join(assets_dir, "animations")
+        root = self.root
         if not os.path.isdir(root):
             return
         for action in os.listdir(root):

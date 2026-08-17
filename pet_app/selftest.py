@@ -150,20 +150,25 @@ def _test_rendering(ctrl, checks):
 
 
 def _test_frames(ctrl, checks):
-    """帧动画：临时生成合成帧素材 → 识别、播放、结束复位。"""
+    """帧动画：在临时目录生成合成帧素材 → 识别、播放、结束复位。
+
+    重要：测试只使用临时目录，绝不读写 assets/animations 下的真实素材。
+    """
     import shutil
+    import tempfile
+    from .frames import FrameLibrary
     from .utils import assets_dir
-    root = os.path.join(assets_dir, "animations")
-    shutil.rmtree(root, ignore_errors=True)
+    tmp = tempfile.mkdtemp(prefix="deskpet_frames_test_")
+    saved_lib = ctrl.anims._frames
     try:
-        d = os.path.join(root, "jump")
+        d = os.path.join(tmp, "jump")
         os.makedirs(d, exist_ok=True)
         base = Image.open(os.path.join(assets_dir, "pet.png")).convert("RGBA")
         for i, dy in enumerate((0, 16, 0)):
             frame = Image.new("RGBA", base.size, (0, 0, 0, 0))
             frame.alpha_composite(base, (0, -dy))
             frame.save(os.path.join(d, f"frame_{i}.png"))
-        ctrl.anims._frames.scan()
+        ctrl.anims.set_frame_library(FrameLibrary(tmp))
         _check(checks, "帧素材识别", ctrl.anims._frames.has("jump"))
         ctrl.anims.play("jump")
         p1 = ctrl.window.pet_item.pixmap().cacheKey()
@@ -177,8 +182,8 @@ def _test_frames(ctrl, checks):
         loop.exec()
         _check(checks, "帧动画结束复位", not ctrl.anims.is_busy())
     finally:
-        shutil.rmtree(root, ignore_errors=True)
-        ctrl.anims._frames.scan()
+        ctrl.anims.set_frame_library(saved_lib)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _test_jump_headroom(ctrl, checks):
