@@ -97,7 +97,7 @@ def check_video_status(api_key, request_id):
                       api_key, timeout=30)
 
 
-def submit_video(api_key, image_path, prompt, size="720x1280") -> str:
+def submit_video(api_key, image_path, prompt, size="720x1280", seed=None) -> str:
     """提交图生视频任务，返回 requestId。"""
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
@@ -109,6 +109,8 @@ def submit_video(api_key, image_path, prompt, size="720x1280") -> str:
         "negative_prompt": "背景复杂，多余物品，文字，水印，多个人，角色外观改变，"
                            "动作过快，快速晃动，动作幅度过大，身体变形，手指畸形",
     }
+    if seed is not None:
+        payload["seed"] = int(seed)
     # 官方接口为 /video/submit（若服务端 404 再尝试 /video/submissions）
     for endpoint in ("/video/submit", "/video/submissions"):
         try:
@@ -164,6 +166,24 @@ def extract_frames(video_path, count):
     return frames
 
 
+def _best_loop_len(frames):
+    """循环点对齐：找与首帧姿态最接近的帧作为循环终点。
+
+    从后半段开始找（保证至少半段动作），比较与首帧的平均像素差，
+    裁剪尾部后循环衔接处的姿态跳变最小。
+    """
+    n = len(frames)
+    if n < 12:
+        return n
+    first = frames[0].astype(np.float32)
+    best_k, best_d = n, float("inf")
+    for k in range(n // 2, n):
+        d = float(np.abs(frames[k].astype(np.float32) - first).mean())
+        if d < best_d:
+            best_d, best_k = d, k
+    return best_k
+
+
 def extract_and_save(video_path, action, frames_n=None):
     """从视频按 10fps（与程序播放帧率一致）抽帧 → AI 抠图 → 保存帧素材。
 
@@ -181,32 +201,54 @@ def extract_and_save(video_path, action, frames_n=None):
     print(f"  视频 {duration:.1f}s → 抽帧 ×{frames_n}（10fps）+ 逐帧抠图…")
     import process_character as pc
     frames = extract_frames(video_path, frames_n)
+
+    # 循环动作：循环点对齐，裁剪尾部，衔接处姿态最接近
+    if action in ("idle", "walk") and len(frames) >= 12:
+        k = _best_loop_len(frames)
+        if k < len(frames):
+            print(f"  循环点对齐：裁剪尾部 {len(frames) - k} 帧")
+            frames = frames[:k]
+
     out_dir = os.path.join(assets_dir, "animations", action)
     os.makedirs(out_dir, exist_ok=True)
     model = pc.resolve_model("auto")
     # 主形象尺寸（用于把保护区坐标按比例映射到帧画布）
     main_path = os.path.join(assets_dir, "pet.png")
     main_size = Image.open(main_path).size if os.path.isfile(main_path) else None
+    # 保护区掩码（按帧画布比例映射，所有帧共用）
+    protect = None
+    if main_size and frames:
+        h, w = frames[0].shape[:2]
+        sx, sy = w / main_size[0], h / main_size[1]
+        protect = np.zeros((h, w), dtype=bool)
+        for (x0, y0, x1, y1) in pc.PROTECT_REGIONS:
+            protect[int(y0 * sy):int(y1 * sy),
+                    int(x0 * sx):int(x1 * sx)] = True
 
     for i, frame in enumerate(frames):
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         # 与主形象相同的 AI 语义分割抠图（避免人物身上出现小空缺）
         try:
             alpha = pc.segment(np.asarray(img.convert("RGB")), model, verbose=False)
-            # 额外清理：远离深色内容的近白像素（isnet 掩码中残留的
-            # 背景口袋 = 人物背后的白色块）
             gray = np.asarray(img.convert("L"))
+            # 清理一：与帧边缘通过浅色路径连通的像素 = 背景（含灰白阴影，
+            # 视频背景常非纯白），保护区除外
+            light = ((gray >= 200).astype(np.uint8) * 255)
+            pad = cv2.copyMakeBorder(light, 1, 1, 1, 1,
+                                     cv2.BORDER_CONSTANT, value=255)
+            ff = np.zeros((gray.shape[0] + 4, gray.shape[1] + 4), np.uint8)
+            cv2.floodFill(pad, ff, (0, 0), 0, loDiff=0, upDiff=0,
+                          flags=8 | (255 << 8) | cv2.FLOODFILL_MASK_ONLY)
+            border_light = ff[2:-2, 2:-2] > 0
+            if protect is not None:
+                border_light &= ~protect
+            alpha[border_light] = 0
+            # 清理二：远离深色内容的近白像素（掩码中残留的背景口袋）
             nonwhite = (gray < 235).astype(np.uint8)
             band = cv2.dilate(
                 nonwhite, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21)))
             far = (gray >= 235) & (band == 0)
-            if main_size:                       # 保护区按比例映射到帧画布
-                sx = gray.shape[1] / main_size[0]
-                sy = gray.shape[0] / main_size[1]
-                protect = np.zeros_like(far, dtype=bool)
-                for (x0, y0, x1, y1) in pc.PROTECT_REGIONS:
-                    protect[int(y0 * sy):int(y1 * sy),
-                            int(x0 * sx):int(x1 * sx)] = True
+            if protect is not None:
                 far &= ~protect
             alpha[far] = 0
             img = img.convert("RGBA")
@@ -219,14 +261,14 @@ def extract_and_save(video_path, action, frames_n=None):
 
 
 def process_action(api_key, image_path, action, cfg, out_root, shots=1,
-                   frames_n=None):
+                   frames_n=None, seed=None):
     """单动作：生成视频（可多候选）→ 保留原片 → 抽帧抠图。"""
     raw_dir = os.path.join(assets_dir, "animations", "_raw")
     os.makedirs(raw_dir, exist_ok=True)
     for shot in range(shots):
         label = action if shots == 1 else f"{action}_{shot + 1}"
         print(f"[{label}] 提交图生视频任务…")
-        rid = submit_video(api_key, image_path, cfg["prompt"])
+        rid = submit_video(api_key, image_path, cfg["prompt"], seed=seed)
         print(f"[{label}] 任务 {rid}，等待生成（约 1-5 分钟）…")
         url = wait_video(api_key, rid)
         video = os.path.join(raw_dir, f"{label}.mp4")
@@ -278,6 +320,7 @@ def main():
     if "--frames" in args:
         frame_override = int(args[args.index("--frames") + 1])
     shots = int(args[args.index("--shots") + 1]) if "--shots" in args else 1
+    seed = int(args[args.index("--seed") + 1]) if "--seed" in args else None
 
     image_path = os.path.join(assets_dir, "pet.png")
     if not os.path.isfile(image_path):
@@ -295,7 +338,7 @@ def main():
             continue
         try:
             process_action(api_key, white_bg, action, cfg, assets_dir,
-                           shots=shots, frames_n=frame_override)
+                           shots=shots, frames_n=frame_override, seed=seed)
         except Exception as e:                        # noqa: BLE001
             print(f"[{action}] 失败: {e}")
     if shots > 1:
